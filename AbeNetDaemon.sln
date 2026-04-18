@@ -1,0 +1,27 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NetDaemonCS", "NetDaemonCS\NetDaemonCS.csproj", "{8EECDF7E-5704-440F-926E-7C2791EF3B08}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "AbeFsDaemon", "NetDaemonFS\AbeFsDaemon.fsproj", "{8C3D4846-4181-43C6-9C56-A841664AEEC8}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{CE32B21F-7A74-381E-6B50-9D3643E4B266}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CE32B21F-7A74-381E-6B50-9D3643E4B266}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CE32B21F-7A74-381E-6B50-9D3643E4B266}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CE32B21F-7A74-381E-6B50-9D3643E4B266}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {1AB2308C-B04C-4102-873F-1525EFCCD51D}
+	EndGlobalSection
+EndGlobal

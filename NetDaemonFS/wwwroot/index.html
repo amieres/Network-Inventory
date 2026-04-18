@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Network Inventory</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;            /* prevent HA iframe double scrollbar */
+    }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ────────────────────────────────────────────── */
+    header {
+      background: #1a1d2e;
+      border-bottom: 1px solid #2d3048;
+      padding: 1rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+    }
+    header h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #7c8cf8;
+      white-space: nowrap;
+    }
+    #search {
+      flex: 1;
+      min-width: 180px;
+      padding: 0.4rem 0.75rem;
+      border: 1px solid #2d3048;
+      border-radius: 6px;
+      background: #0f1117;
+      color: #e2e8f0;
+      font-size: 0.875rem;
+    }
+    #search:focus { outline: none; border-color: #7c8cf8; }
+
+    /* ── Stats bar ─────────────────────────────────────────── */
+    #stats-bar {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0.75rem 1.5rem;
+      background: #1a1d2e;
+      border-bottom: 1px solid #2d3048;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .stat-badge {
+      background: #252840;
+      border: 1px solid #3a3f5c;
+      border-radius: 6px;
+      padding: 0.25rem 0.65rem;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .stat-badge:hover       { background: #3a3f5c; }
+    .stat-badge.active      { background: #4c51bf; border-color: #7c8cf8; }
+    .stat-badge.tri-include { background: #065f46; border-color: #34d399; color: #a7f3d0; }
+    .stat-badge.tri-exclude { background: #7f1d1d; border-color: #f87171; color: #fecaca; }
+    .stat-badge.tri-include::before { content: '+ '; font-weight: 700; }
+    .stat-badge.tri-exclude::before { content: '− '; font-weight: 700; }
+    .stat-badge span        { font-weight: 700; margin-left: 0.3em; color: #a5b4fc; }
+    .stat-sep               { width: 1px; align-self: stretch; background: #2d3048; margin: 0 0.25rem; }
+
+    /* ── Category filter ───────────────────────────────────── */
+    #cat-bar {
+      display: flex;
+      gap: 0.4rem;
+      padding: 0.6rem 1.5rem;
+      flex-wrap: wrap;
+      border-bottom: 1px solid #2d3048;
+      background: #141520;
+    }
+    .cat-btn {
+      padding: 0.2rem 0.6rem;
+      border: 1px solid #2d3048;
+      border-radius: 4px;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .cat-btn:hover  { background: #252840; color: #e2e8f0; }
+    .cat-btn.active { background: #312e81; border-color: #7c8cf8; color: #c7d2fe; }
+
+    /* ── Scan buttons (now in header) ─────────────────────── */
+    #btn-scan {
+      padding: 0.35rem 0.9rem;
+      background: #4f46e5;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    #btn-scan:hover    { background: #4338ca; }
+    #btn-scan:disabled { background: #312e81; color: #818cf8; cursor: not-allowed; }
+    #btn-cleanup {
+      padding: 0.35rem 0.9rem;
+      background: #854d0e;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    #btn-cleanup:hover    { background: #a16207; }
+    #btn-cleanup:disabled { background: #422006; color: #ca8a04; cursor: not-allowed; }
+    #btn-cols {
+      padding: 0.35rem 0.9rem;
+      background: transparent;
+      border: 1px solid #2d3048;
+      border-radius: 6px;
+      color: #94a3b8;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+    #btn-cols:hover { background: #252840; color: #e2e8f0; }
+
+    /* ── Columns modal ─────────────────────────────────────── */
+    #col-modal { position: fixed; inset: 0; z-index: 100; }
+    #col-modal[hidden] { display: none; }
+    .col-modal-bg { position: absolute; inset: 0; background: rgba(0,0,0,0.6); }
+    .col-modal-box {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: #1a1d2e;
+      border: 1px solid #2d3048;
+      border-radius: 8px;
+      min-width: 340px;
+      max-width: 500px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .col-modal-head { padding: 0.75rem 1rem; border-bottom: 1px solid #2d3048; display: flex; justify-content: space-between; align-items: center; }
+    .col-modal-head button { background: none; border: none; color: #94a3b8; font-size: 1.25rem; cursor: pointer; }
+    .col-modal-body { padding: 0.75rem 1rem; overflow-y: auto; }
+    .col-modal-body ul { list-style: none; }
+    .col-modal-body li {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.35rem 0.3rem; border-radius: 4px;
+      font-size: 0.82rem;
+    }
+    .col-modal-body li:hover { background: #252840; }
+    .col-modal-body li input[type=checkbox] { accent-color: #4f46e5; }
+    .col-modal-body li .col-label { flex: 1; }
+    .col-modal-body li .col-move { background: none; border: none; color: #64748b; cursor: pointer; padding: 0 0.2rem; }
+    .col-modal-body li .col-move:hover { color: #a5b4fc; }
+    .col-modal-sep { margin-top: 0.8rem; padding-bottom: 0.3rem; font-size: 0.7rem; text-transform: uppercase; color: #64748b; border-bottom: 1px solid #2d3048; }
+    .col-modal-foot { padding: 0.6rem 1rem; border-top: 1px solid #2d3048; display: flex; justify-content: flex-end; }
+    .col-modal-foot button {
+      padding: 0.3rem 0.8rem; background: transparent;
+      border: 1px solid #2d3048; border-radius: 4px;
+      color: #94a3b8; cursor: pointer; font-size: 0.78rem;
+    }
+    .col-modal-foot button:hover { background: #252840; color: #e2e8f0; }
+    .lock-btn { background: none; border: none; cursor: pointer; font-size: 0.65rem; opacity: 0.25; padding: 0 1px; line-height: 1; vertical-align: middle; }
+    .lock-btn:hover  { opacity: 0.6; }
+    .lock-btn.locked { opacity: 1; filter: sepia(1) saturate(3) hue-rotate(5deg); }
+    #scan-status       { font-size: 0.75rem; color: #64748b; }
+    #scan-status.running { color: #fbbf24; }
+    .dot-spin::after {
+      content: ''; display: inline-block; width: 0.5em; height: 0.5em;
+      border: 2px solid #fbbf24; border-top-color: transparent;
+      border-radius: 50%; animation: spin 0.6s linear infinite; margin-left: 0.4em;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Main table ────────────────────────────────────────── */
+    #main { padding: 0 1.5rem 1rem; overflow: auto; flex: 1; min-height: 0; }
+
+    table {
+      border-spacing: 0;
+      font-size: 0.82rem;
+      table-layout: fixed;
+    }
+    thead th {
+      background: #1a1d2e;
+      color: #64748b;
+      font-weight: 600;
+      text-align: left;
+      padding: 0.5rem 0.6rem;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      user-select: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      box-shadow: inset 0 -1px 0 #2d3048;
+      cursor: grab;
+    }
+    thead th.dragging-col { opacity: 0.5; }
+    thead th.drag-over-col { box-shadow: inset 3px 0 0 #7c8cf8, inset 0 -1px 0 #2d3048; }
+    thead th[data-col] { cursor: pointer; }
+    thead th:hover { color: #a5b4fc; }
+    thead th.sorted { color: #7c8cf8; }
+    .col-resizer {
+      position: absolute;
+      top: 0; right: 0; bottom: 0;
+      width: 6px;
+      cursor: col-resize;
+      user-select: none;
+      z-index: 2;
+    }
+    .col-resizer:hover, .col-resizer.dragging { background: #4f46e5; }
+
+    tbody tr { border-bottom: 1px solid #1e2130; }
+    tbody tr:hover { background: #1a1d2e; }
+
+    td { padding: 0.45rem 0.6rem; vertical-align: top; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    td.note-cell, td.addr-cell { white-space: normal; overflow: visible; }
+    td * { max-width: 100%; }
+
+    /* ── Status dot ────────────────────────────────────────── */
+    .dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #374151;
+      margin-right: 0.4em;
+    }
+    .dot.online { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
+    .dot.ble    { background: #38bdf8; box-shadow: 0 0 6px #38bdf888; }
+
+    /* ── Conn type badge ───────────────────────────────────── */
+    .conn {
+      display: inline-block;
+      padding: 0.1em 0.45em;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .conn-wired   { background: #1e3a5f; color: #60a5fa; }
+    .conn-24      { background: #1c3a2a; color: #4ade80; }
+    .conn-5       { background: #2a1c3a; color: #c084fc; }
+    .conn-bt      { background: #1c2a3a; color: #38bdf8; }
+    .conn-unknown { background: #252525; color: #6b7280; }
+
+    /* ── Link ──────────────────────────────────────────────── */
+    a { color: #7c8cf8; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Notes cell ────────────────────────────────────────── */
+    .note-cell { max-width: 240px; }
+    .note-list { list-style: none; }
+    .note-list li {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.4rem;
+      align-items: flex-start;
+      font-size: 0.75rem;
+      color: #94a3b8;
+      margin-bottom: 0.2em;
+    }
+    .note-list li span { flex: 1; }
+    .note-del {
+      background: none;
+      border: none;
+      color: #ef4444;
+      cursor: pointer;
+      font-size: 0.75rem;
+      padding: 0;
+      line-height: 1;
+    }
+    .note-add {
+      display: flex;
+      gap: 0.3rem;
+      margin-top: 0.3em;
+    }
+    .note-add input {
+      flex: 1;
+      font-size: 0.72rem;
+      padding: 0.2rem 0.4rem;
+      background: #141520;
+      border: 1px solid #2d3048;
+      border-radius: 4px;
+      color: #e2e8f0;
+    }
+    .note-add input:focus { outline: none; border-color: #4f46e5; }
+    .note-add button {
+      background: #312e81;
+      border: none;
+      border-radius: 4px;
+      color: #c7d2fe;
+      font-size: 0.72rem;
+      padding: 0.2rem 0.5rem;
+      cursor: pointer;
+    }
+    .note-add button:hover { background: #4f46e5; }
+
+    /* ── Scan attrs (read-only) ─────────────────────────────── */
+    .attr-list {
+      list-style: none;
+      margin-top: 0.35em;
+      padding-top: 0.35em;
+      border-top: 1px dashed #2d3048;
+    }
+    .attr-row {
+      display: flex;
+      gap: 0.4rem;
+      font-size: 0.68rem;
+      color: #64748b;
+      font-family: monospace;
+      line-height: 1.3;
+    }
+    .attr-k { color: #475569; min-width: 10em; }
+    .attr-v { color: #94a3b8; word-break: break-all; }
+
+    /* ── Empty state ───────────────────────────────────────── */
+    #empty {
+      text-align: center;
+      padding: 4rem 1rem;
+      color: #4b5563;
+    }
+
+    /* ── Shown count ────────────────────────────────────────── */
+    #shown-count { font-size: 0.72rem; color: #4b5563; margin-left: auto; white-space: nowrap; }
+
+    /* ── Inline edit row ─────────────────────────────────────── */
+    .edit-btn {
+      background: none; border: none; color: #4b5563; cursor: pointer;
+      font-size: 0.85rem; padding: 0 0.25rem;
+      opacity: 0; transition: opacity 0.15s, color 0.15s; vertical-align: middle;
+    }
+    tr:hover .edit-btn, .edit-btn.open { opacity: 1; color: #7c8cf8; }
+    .edit-row td { padding: 0.55rem 1.5rem; background: #141520; border-bottom: 2px solid #4f46e5; }
+    .edit-form  { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-end; }
+    .edit-field { display: flex; flex-direction: column; gap: 0.2rem; }
+    .edit-field label { font-size: 0.68rem; color: #64748b; text-transform: uppercase; letter-spacing: .04em; }
+    .edit-field input {
+      padding: 0.28rem 0.5rem; background: #0f1117;
+      border: 1px solid #2d3048; border-radius: 4px;
+      color: #e2e8f0; font-size: 0.8rem; min-width: 140px;
+    }
+    .edit-field input:focus { outline: none; border-color: #7c8cf8; }
+    .edit-actions { display: flex; gap: 0.4rem; align-self: flex-end; }
+    .edit-save   { padding: 0.28rem 0.75rem; background: #4f46e5; border: none; border-radius: 4px; color: #fff; cursor: pointer; font-size: 0.8rem; }
+    .edit-save:hover   { background: #4338ca; }
+    .edit-cancel { padding: 0.28rem 0.6rem; background: transparent; border: 1px solid #2d3048; border-radius: 4px; color: #94a3b8; cursor: pointer; font-size: 0.8rem; }
+    .edit-cancel:hover { background: #1a1d2e; }
+
+    /* ── Context menu ──────────────────────────────────────── */
+    #ctx-menu {
+      position: fixed; z-index: 200;
+      background: #1a1d2e; border: 1px solid #3a3f5c;
+      border-radius: 6px; padding: 0.3rem 0;
+      min-width: 180px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    #ctx-menu[hidden] { display: none; }
+    #ctx-menu button {
+      display: block; width: 100%; text-align: left;
+      background: none; border: none; color: #e2e8f0;
+      padding: 0.4rem 0.9rem; font-size: 0.8rem; cursor: pointer;
+    }
+    #ctx-menu button:hover { background: #252840; }
+    #ctx-menu button.danger { color: #f87171; }
+    #ctx-menu button.danger:hover { background: #3b1111; }
+    #ctx-menu hr { border: none; border-top: 1px solid #2d3048; margin: 0.2rem 0; }
+
+    /* ── Merge-target highlight ─────────────────────────────── */
+    tr.merge-target    { outline: 2px dashed #7c8cf8; outline-offset: -2px; }
+    tr.row-refreshing  { opacity: 0.5; }
+    tr.row-flash-ok    { background: #14532d !important; transition: background 1.2s ease; }
+    .merge-banner[hidden] { display: none; }
+    .merge-banner {
+      padding: 0.5rem 1.5rem; background: #312e81; color: #c7d2fe;
+      font-size: 0.82rem; display: flex; align-items: center; gap: 0.75rem;
+    }
+    .merge-banner button {
+      padding: 0.25rem 0.6rem; border-radius: 4px; border: 1px solid #4f46e5;
+      background: transparent; color: #c7d2fe; cursor: pointer; font-size: 0.78rem;
+    }
+    .merge-banner button:hover { background: #4f46e5; color: #fff; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v61 · js <span id="js-version">?</span></span></h1>
+  <button id="btn-scan">Scan Now</button>
+  <button id="btn-cleanup" title="Purge transient BLE/random-MAC devices older than the specified age">Cleanup</button>
+  <input id="cleanup-age" type="number" min="1" value="240" title="Max age in minutes for manual cleanup" style="width:52px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:2px 4px;font-size:0.8rem">
+  <label for="cleanup-age" style="font-size:0.75rem;color:#64748b">min</label>
+  <span id="scan-status">—</span>
+  <span id="shown-count"></span>
+  <input id="search" type="search" placeholder="Search name, IP, MAC, category..." autocomplete="off" />
+  <button id="btn-cols" title="Configure columns">Columns</button>
+</header>
+
+<div id="stats-bar">
+  <span class="stat-badge active" data-action="reset">All<span id="s-total">—</span></span>
+  <span class="stat-sep"></span>
+  <span class="stat-badge" data-group="status"  data-filter="online">Online<span id="s-online">—</span></span>
+  <span class="stat-sep"></span>
+  <span class="stat-badge" data-group="kind"    data-filter="wired">Wired<span id="s-wired">—</span></span>
+  <span class="stat-badge" data-group="kind"    data-filter="2.4G">2.4G<span id="s-24">—</span></span>
+  <span class="stat-badge" data-group="kind"    data-filter="5G">5G<span id="s-5">—</span></span>
+  <span class="stat-badge" data-group="kind"    data-filter="webui">Web UI<span id="s-webui">—</span></span>
+  <span class="stat-sep"></span>
+  <span class="stat-badge" data-group="special" data-filter="bt">BT<span id="s-bt">—</span></span>
+  <span class="stat-badge" data-group="special" data-filter="unknown">Unknown<span id="s-unk">—</span></span>
+</div>
+
+<div id="cat-bar">
+  <button class="cat-btn active" data-cat="">All</button>
+</div>
+
+
+<div id="main">
+  <table id="tbl">
+    <colgroup id="colgroup"></colgroup>
+    <thead><tr id="thead-row"></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div id="empty" hidden>No devices match the current filter.</div>
+</div>
+
+<div id="col-modal" hidden>
+  <div class="col-modal-bg"></div>
+  <div class="col-modal-box">
+    <div class="col-modal-head">
+      <strong>Configure Columns</strong>
+      <button id="col-modal-close">×</button>
+    </div>
+    <div class="col-modal-body">
+      <ul id="col-list"></ul>
+      <div class="col-modal-sep">Scan Attributes</div>
+      <ul id="attr-list"></ul>
+    </div>
+    <div class="col-modal-foot">
+      <button id="col-reset">Reset</button>
+    </div>
+  </div>
+</div>
+
+<div id="merge-banner" hidden class="merge-banner">
+  <span id="merge-msg"></span>
+  <button id="merge-cancel">Cancel</button>
+</div>
+
+<div id="ctx-menu" hidden></div>
+
+<script src="app.js?v=75"></script>
+</body>
+</html>

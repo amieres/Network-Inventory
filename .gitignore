@@ -1,0 +1,31 @@
+# ── Secrets & personal config ─────────────────────────────────────────────────
+NetDaemonFS/appsettings.json
+netgear_probe.fsx
+deploy.fsx
+devices.json
+
+# ── Build artifacts ───────────────────────────────────────────────────────────
+**/bin/
+**/obj/
+**/publish/
+*.user
+
+# ── Database ──────────────────────────────────────────────────────────────────
+*.db
+*.db-wal
+*.db-shm
+
+# ── Auto-generated code ───────────────────────────────────────────────────────
+NetDaemonCS/HomeAssistantGenerated.cs
+
+# ── Auto-generated HA metadata ────────────────────────────────────────────────
+NetDaemonCS/NetDaemonCodegen/
+
+# ── Claude Code IDE settings ──────────────────────────────────────────────────
+.claude/
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vs/
+*.suo
+.idea/
+*.DS_Store
