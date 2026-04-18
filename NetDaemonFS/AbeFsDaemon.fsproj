@@ -1,0 +1,75 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetDaemonCS\NetDaemonCS.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="src/Inventory/Domain.fs" />
+    <Compile Include="src/Inventory/SeedData.fs" />
+    <Compile Include="src/Inventory/Config.fs" />
+    <Compile Include="src/Inventory/Database.fs" />
+    <Compile Include="src/Inventory/NetgearClient.fs" />
+    <Compile Include="src/Inventory/EeroClient.fs" />
+    <Compile Include="src/Inventory/BermudaClient.fs" />
+    <Compile Include="src/Inventory/Scanner.fs" />
+    <Compile Include="src/Inventory/ScanService.fs" />
+    <Compile Include="src/Inventory/Api.fs" />
+    <Compile Include="src/Inventory/WebHost.fs" />
+    <Compile Include="src/RebootRaspi.fs" />
+    <Compile Include="src/AppModel.fs" />
+    <Compile Include="src/HelloWorld.fs" />
+    <Compile Include="src/Scheduler.fs" />
+    <Compile Include="src/HassModel.fs" />
+    <Compile Include="src/program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+      <Content Include="$(MSBuildProjectDir)appsettings.Development.json">
+          <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+          <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+      </Content>
+      <Content Include="$(MSBuildProjectDir)appsettings.json">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+          <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      </Content>
+      <Content Include="$(MSBuildProjectDir)yaml/**/*.yaml">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+          <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </Content>
+      <Content Include="$(MSBuildProjectDir)wwwroot/**/*">
+          <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+          <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </Content>
+  </ItemGroup>
+
+  <Target Name="AfterPublishMessage" AfterTargets="Publish">
+      <Message Text="Publish done! Copy all content in directory: $(PublishDir) to the `/config/netdaemon5' folder for add-on or your custom folder to deploy." Importance="high" />
+  </Target>
+
+  <ItemGroup>
+      <PackageReference Include="NetDaemon.AppModel"              Version="25.18.1"  />
+      <PackageReference Include="NetDaemon.Runtime"               Version="25.18.1"  />
+      <PackageReference Include="NetDaemon.HassModel"             Version="25.18.1"  />
+      <PackageReference Include="NetDaemon.HassModel.Integration" Version="25.18.1"  />
+      <PackageReference Include="NetDaemon.Client"                Version="25.18.1"  />
+      <PackageReference Include="NetDaemon.Extensions.Scheduling" Version="25.18.1"  />
+      <PackageReference Include="NetDaemon.Extensions.Logging"    Version="25.18.1"  />
+      <PackageReference Include="NetDaemon.Extensions.Tts"        Version="25.18.1"  />
+      <PackageReference Include="SSH.NET"                         Version="2025.0.0" />
+      <PackageReference Include="Falco"                           Version="5.2.0"    />
+      <PackageReference Include="Microsoft.Data.Sqlite"           Version="9.0.4"    />
+      <PackageReference Include="FSharp.SystemTextJson"           Version="1.3.13"   />
+  </ItemGroup>
+
+</Project>
