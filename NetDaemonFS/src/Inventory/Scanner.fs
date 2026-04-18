@@ -470,44 +470,9 @@ let runScan (src: ScanSources) (conn: SqliteConnection) : Async<int> =
                         firstSeen  = ts
                         lastSeen   = ts
                     }
-                match d.rssi with
-                | Some v ->
+                for KeyValue(key, value) in d.rawAttrs do
                     Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.rssi"; value = string v; source = "bermuda"; updatedAt = ts }
-                | None -> ()
-                if d.name <> "" then
-                    Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.name"; value = d.name; source = "bermuda"; updatedAt = ts }
-                match d.area with
-                | Some a ->
-                    Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.area"; value = a; source = "bermuda"; updatedAt = ts }
-                | None -> ()
-                match d.distance with
-                | Some v ->
-                    Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.distance_m"; value = sprintf "%.2f" v; source = "bermuda"; updatedAt = ts }
-                | None -> ()
-                match d.nearestScanner with
-                | Some s ->
-                    Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.nearest_scanner"; value = s; source = "bermuda"; updatedAt = ts }
-                | None -> ()
-                match d.floor with
-                | Some f ->
-                    Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.floor"; value = f; source = "bermuda"; updatedAt = ts }
-                | None -> ()
-                match d.lastSeen with
-                | Some dt ->
-                    Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.last_seen"; value = dt.ToString("o"); source = "bermuda"; updatedAt = ts }
-                | None -> ()
-                match d.areaLastSeen with
-                | Some s ->
-                    Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.area_last_seen"; value = s; source = "bermuda"; updatedAt = ts }
-                | None -> ()
+                        { key = key; value = value; source = "bermuda"; updatedAt = ts }
                 if d.isHome then
                     Database.appendScanHistory conn deviceId None true
                     deviceCount <- deviceCount + 1

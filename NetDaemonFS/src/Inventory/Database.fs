@@ -830,6 +830,7 @@ let purgeTransientDevices (conn: SqliteConnection) (cutoff: DateTimeOffset) : in
         WHERE category = 'Unknown'
           AND last_seen < @cutoff
           AND id NOT IN (SELECT device_id FROM device_ips)
+          AND id NOT IN (SELECT device_id FROM device_addrs WHERE source = 'manual')
           AND (
               -- BLE-only: has bluetooth addrs but no MAC addrs
               (    EXISTS (SELECT 1 FROM device_addrs WHERE device_id = devices.id AND addr_type = 'bluetooth')
@@ -856,6 +857,7 @@ let purgeStaleAddresses (conn: SqliteConnection) (cutoff: DateTimeOffset) : int 
         DELETE FROM device_addrs
         WHERE is_active = 0
           AND last_seen < @cutoff
+          AND source != 'manual'
           AND (
               (addr_type = 'bluetooth'
                   AND UPPER(SUBSTR(address, 1, 1)) NOT IN ('0','1','2','3'))

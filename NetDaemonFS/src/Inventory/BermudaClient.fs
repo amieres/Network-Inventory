@@ -15,13 +15,8 @@ type BleDevice = {
     irk            : string      // lower-case 32-char hex IRK key for Private BLE Devices; "" otherwise
     name           : string      // best available name; may be empty
     isHome         : bool        // zone = "home" → currently visible
-    rssi           : int option
-    area           : string option  // Bermuda-assigned area/room name (e.g. "Game Room")
-    distance       : float option          // area_distance in metres
-    floor          : string option         // HA floor name for the area
-    nearestScanner : string option         // scanner with the strongest signal
-    lastSeen       : DateTimeOffset option // when Bermuda last received a BLE advertisement
-    areaLastSeen   : string option         // last area/room the device was seen in
+    lastSeen       : DateTimeOffset option // when Bermuda last received a BLE advertisement (absolute)
+    rawAttrs       : Map<string, string>   // all scalar Bermuda fields, keyed as "bermuda.<field>"
 }
 
 let private validMac (s: string) =
@@ -142,18 +137,36 @@ let fetchDevices (log: ILogger) (http: HttpClient) : Async<BleDevice list> =
                                                 |> Option.map fst
                                             else None
 
+                                    let absLastSeen = monoToAbs prop.Name
+
+                                    // Collect all scalar fields generically; skip internal/complex ones
+                                    let rawAttrs =
+                                        [ for p in d.EnumerateObject() do
+                                            if not (p.Name.StartsWith("_")) then
+                                                let v =
+                                                    match p.Value.ValueKind with
+                                                    | JsonValueKind.String -> Some (p.Value.GetString())
+                                                    | JsonValueKind.Number -> Some (p.Value.ToString())
+                                                    | JsonValueKind.True   -> Some "true"
+                                                    | JsonValueKind.False  -> Some "false"
+                                                    | _                    -> None  // skip objects/arrays/null
+                                                match v with
+                                                | Some s -> yield $"bermuda.{p.Name}", s
+                                                | None   -> () ]
+                                        |> Map.ofList
+                                        // Replace raw monotonic last_seen with computed absolute timestamp
+                                        |> (fun m ->
+                                            match absLastSeen with
+                                            | Some dt -> m |> Map.add "bermuda.last_seen" (dt.ToString("o"))
+                                            | None    -> m |> Map.remove "bermuda.last_seen")
+
                                     yield {
-                                        mac            = macAddr
-                                        irk            = irkKey
-                                        name           = name
-                                        isHome         = str d "zone" = "home"
-                                        rssi           = intProp d "area_rssi"
-                                        area           = strOpt d "area_name"
-                                        distance       = floatProp d "area_distance"
-                                        floor          = strOpt d "floor_name"
-                                        nearestScanner = nearestScanner
-                                        lastSeen       = monoToAbs prop.Name
-                                        areaLastSeen   = strOpt d "area_last_seen"
+                                        mac      = macAddr
+                                        irk      = irkKey
+                                        name     = name
+                                        isHome   = str d "zone" = "home"
+                                        lastSeen = absLastSeen
+                                        rawAttrs = rawAttrs
                                     } ]
 
                     let home = devices |> List.filter (fun d -> d.isHome) |> List.length
