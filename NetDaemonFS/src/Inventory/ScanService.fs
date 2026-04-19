@@ -89,7 +89,7 @@ type ScanService
             match Database.getById conn deviceId with
             | None -> return None
             | Some dev ->
-                let! bleDevices = BermudaClient.fetchDevices log client
+                let! bleDevices = BermudaClient.fetchDevices log client false
                 let ts = DateTimeOffset.UtcNow
 
                 // Build lookup sets from device's known addresses

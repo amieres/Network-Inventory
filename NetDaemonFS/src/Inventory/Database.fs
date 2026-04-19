@@ -792,6 +792,13 @@ let setAddrReservation (conn: SqliteConnection) (deviceId: string) (address: str
     cmd.Parameters.AddWithValue("@addr",     address)                            |> ignore
     cmd.ExecuteNonQuery() |> ignore
 
+let deleteAddr (conn: SqliteConnection) (deviceId: string) (address: string) =
+    use cmd = conn.CreateCommand()
+    cmd.CommandText <- "DELETE FROM device_addrs WHERE device_id = @did AND address = @addr"
+    cmd.Parameters.AddWithValue("@did",  deviceId) |> ignore
+    cmd.Parameters.AddWithValue("@addr", address)  |> ignore
+    cmd.ExecuteNonQuery() |> ignore
+
 // ── CSV export ────────────────────────────────────────────────────────────────
 
 let exportCsv (conn: SqliteConnection) : string =

@@ -1,4 +1,4 @@
-const JS_VERSION = 83;
+const JS_VERSION = 87;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -64,7 +64,19 @@ function deviceName(d)  {
       || primaryBt(d)
       || '';
 }
-function deviceModel(d) { return d.model ?? ''; }
+function deviceModelWithSource(d) {
+  if (d.model) return { value: d.model, source: '' };
+  for (const [key, label] of [
+    ['netgear.model',      'Netgear'],
+    ['eero.model',         'Eero'],
+    ['eero.device_type',   'Eero'],
+  ]) {
+    const v = scanAttr(d, key);
+    if (v) return { value: v, source: label };
+  }
+  return { value: '', source: '' };
+}
+function deviceModel(d) { return deviceModelWithSource(d).value; }
 
 // Returns current IPs ordered consistently with orderedMacAddrs for row alignment.
 function orderedCurrentIps(d) {
@@ -153,9 +165,19 @@ function matchesFilter(d) {
 
 // ── Column definitions ───────────────────────────────────────────────────────
 
-function deviceManufacturer(d) {
-  return scanAttr(d, 'eero.manufacturer') || scanAttr(d, 'oui.manufacturer') || scanAttr(d, 'bt.manufacturer') || '';
+function deviceManufacturerWithSource(d) {
+  for (const [key, label] of [
+    ['eero.manufacturer',    'Eero'],
+    ['bermuda.manufacturer', 'Bermuda'],
+    ['oui.manufacturer',     'OUI'],
+    ['bt.manufacturer',      'BT OUI'],
+  ]) {
+    const v = scanAttr(d, key);
+    if (v) return { value: v, source: label };
+  }
+  return { value: '', source: '' };
 }
+function deviceManufacturer(d) { return deviceManufacturerWithSource(d).value; }
 
 const CELL_RENDERERS = {
   online: d => {
@@ -213,15 +235,18 @@ const CELL_RENDERERS = {
         const lock     = pairedIp || a.isReserved
           ? `<button class="${lockCls}" data-device="${d.id}" data-address="${esc(a.address)}" data-reserved-ip="${esc(a.isReserved ? (a.reservedIp ?? '') : pairedIp)}" data-is-reserved="${a.isReserved}" title="${esc(lockTip)}">🔒</button>`
           : '';
-        return `<div style="font-family:monospace;font-size:0.75rem;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;${s}" title="${esc(addrTip(a.source, a.firstSeen, a.lastSeen))}">${addrDot(a, false)}${esc(a.address)}${lock}</div>`;
+        const del  = a.source === 'manual' ? `<button class="addr-del-btn" data-device="${d.id}" data-address="${esc(a.address)}" title="Remove manual address">×</button>` : '';
+        return `<div style="font-family:monospace;font-size:0.75rem;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;${s}" title="${esc(addrTip(a.source, a.firstSeen, a.lastSeen))}">${addrDot(a, false)}${esc(a.address)}${lock}${del}</div>`;
       }),
       ...bts.map(a => {
-        const s = isTransientBt(a.address) ? 'font-style:italic;' : '';
-        return `<div style="font-family:monospace;font-size:0.72rem;color:#38bdf8;overflow:hidden;text-overflow:ellipsis;${s}" title="Bluetooth · ${esc(addrTip(a.source, a.firstSeen, a.lastSeen))}">${addrDot(a, true)}${esc(a.address)}</div>`;
+        const s   = isTransientBt(a.address) ? 'font-style:italic;' : '';
+        const del = a.source === 'manual' ? `<button class="addr-del-btn" data-device="${d.id}" data-address="${esc(a.address)}" title="Remove manual address">×</button>` : '';
+        return `<div style="font-family:monospace;font-size:0.72rem;color:#38bdf8;overflow:hidden;text-overflow:ellipsis;${s}" title="Bluetooth · ${esc(addrTip(a.source, a.firstSeen, a.lastSeen))}">${addrDot(a, true)}${esc(a.address)}${del}</div>`;
       }),
       ...irks.map(a => {
         const abbr = a.address.slice(0, 8) + '…' + a.address.slice(-4);
-        return `<div style="font-family:monospace;font-size:0.72rem;color:#fbbf24;overflow:hidden;text-overflow:ellipsis" title="IRK · ${esc(a.address)} · ${esc(addrTip(a.source, a.firstSeen, a.lastSeen))}">${addrDot(a, false)}${esc(abbr)}</div>`;
+        const del  = a.source === 'manual' ? `<button class="addr-del-btn" data-device="${d.id}" data-address="${esc(a.address)}" title="Remove manual address">×</button>` : '';
+        return `<div style="font-family:monospace;font-size:0.72rem;color:#fbbf24;overflow:hidden;text-overflow:ellipsis" title="IRK · ${esc(a.address)} · ${esc(addrTip(a.source, a.firstSeen, a.lastSeen))}">${addrDot(a, false)}${esc(abbr)}${del}</div>`;
       }),
       ...beacons.map(a => {
         const abbr = a.address.slice(0, 8) + '…' + a.address.slice(-4);
@@ -230,8 +255,8 @@ const CELL_RENDERERS = {
     ];
     return parts.join('') || '<span style="color:#4b5563">—</span>';
   },
-  manufacturer: d => `<span style="font-size:0.78rem">${esc(deviceManufacturer(d))}</span>`,
-  model: d => esc(deviceModel(d)),
+  manufacturer: d => { const m = deviceManufacturerWithSource(d); return m.value ? `<span style="font-size:0.78rem" title="${esc('Source: ' + m.source)}">${esc(m.value)}</span>` : ''; },
+  model: d => { const m = deviceModelWithSource(d); return m.value ? (m.source ? `<span style="font-size:0.78rem" title="${esc('Source: ' + m.source)}">${esc(m.value)}</span>` : esc(m.value)) : ''; },
   webui: d => d.webUiUrl ? `<a href="${d.webUiUrl}" target="_blank" rel="noopener">${esc(d.webUiUrl.replace(/^https?:\/\//, ''))}</a>` : '—',
   firstSeen: d => `<span style="font-size:0.75rem;color:#64748b" title="${d.firstSeen ? esc(new Date(d.firstSeen).toLocaleString()) : ''}">${fmtAge(d.firstSeen)}</span>`,
   lastSeen: d => `<span style="font-size:0.75rem;color:#64748b" title="${d.lastSeen ? esc(new Date(d.lastSeen).toLocaleString()) : ''}">${fmtAge(d.lastSeen)}</span>`,
@@ -559,7 +584,7 @@ async function loadDevices() {
     allDevices.length = 0;
     allDevices.push(...data);
     buildCatBar();
-    render();
+    if (!document.querySelector('.edit-row')) render();
     loadStats();
   } catch (e) {
     console.error('loadDevices:', e);
@@ -841,6 +866,20 @@ document.getElementById('tbody').addEventListener('click', async e => {
     const id = cancelBtn.dataset.id;
     document.querySelector(`.edit-row[data-editfor="${id}"]`)?.remove();
     render();
+    return;
+  }
+
+  // Delete manual address
+  const addrDelBtn = e.target.closest('.addr-del-btn');
+  if (addrDelBtn) {
+    const deviceId = addrDelBtn.dataset.device;
+    const address  = addrDelBtn.dataset.address;
+    try {
+      const updated = await api('DELETE', `/api/devices/${deviceId}/addrs/${encodeURIComponent(address)}`);
+      const idx = allDevices.findIndex(x => x.id === deviceId);
+      if (idx >= 0) allDevices[idx] = updated;
+      render();
+    } catch (ex) { console.error('deleteAddr:', ex); }
     return;
   }
 

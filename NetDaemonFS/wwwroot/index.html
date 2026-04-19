@@ -309,6 +309,11 @@
     }
     .note-add button:hover { background: #4f46e5; }
 
+    .addr-del-btn {
+      background: none; border: none; cursor: pointer; color: #4b5563;
+      font-size: 0.7rem; padding: 0 0.1rem; line-height: 1; vertical-align: middle;
+    }
+    .addr-del-btn:hover { color: #ef4444; }
     .addr-add-btn {
       background: none; border: none; cursor: pointer;
       color: #475569; font-size: 0.78rem; padding: 0 0.15rem;
@@ -427,7 +432,7 @@
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v71 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v72 · js <span id="js-version">?</span></span></h1>
   <button id="btn-scan">Scan Now</button>
   <button id="btn-cleanup" title="Purge transient BLE/random-MAC devices older than the specified age">Cleanup</button>
   <input id="cleanup-age" type="number" min="1" value="240" title="Max age in minutes for manual cleanup" style="width:52px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:2px 4px;font-size:0.8rem">
@@ -523,6 +528,6 @@
 
 <div id="ctx-menu" hidden></div>
 
-<script src="app.js?v=83"></script>
+<script src="app.js?v=87"></script>
 </body>
 </html>

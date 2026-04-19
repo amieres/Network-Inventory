@@ -27,7 +27,7 @@ let private validIrk (s: string) =
     s.Length = 32 && s |> Seq.forall (fun c ->
         (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
 
-let fetchDevices (log: ILogger) (http: HttpClient) : Async<BleDevice list> =
+let fetchDevices (log: ILogger) (http: HttpClient) (debug: bool) : Async<BleDevice list> =
     async {
         let token = Environment.GetEnvironmentVariable("SUPERVISOR_TOKEN")
         if String.IsNullOrEmpty(token) then
@@ -113,8 +113,8 @@ let fetchDevices (log: ILogger) (http: HttpClient) : Async<BleDevice list> =
                                     log.LogDebug("BERMUDA: skipping entry '{key}' — no valid MAC/IRK and no name (address={addr})",
                                         prop.Name, rawAddr)
                                 else
-                                    if macAddr = "" then
-                                        log.LogDebug("BERMUDA: non-MAC entry '{key}' name='{name}' irk={irk} address='{addr}'",
+                                    if macAddr = "" && debug then
+                                        log.LogInformation("BERMUDA DEBUG: non-MAC entry '{key}' name='{name}' irk={irk} address='{addr}'",
                                             prop.Name, name, irkKey, rawAddr)
 
                                     // Nearest scanner: prefer direct field, else derive from scanner_list
