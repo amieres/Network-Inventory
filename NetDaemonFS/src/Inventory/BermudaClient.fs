@@ -15,13 +15,8 @@ type BleDevice = {
     irk            : string      // lower-case 32-char hex IRK key for Private BLE Devices; "" otherwise
     name           : string      // best available name; may be empty
     isHome         : bool        // zone = "home" → currently visible
-    rssi           : int option
-    area           : string option  // Bermuda-assigned area/room name (e.g. "Game Room")
-    distance       : float option          // area_distance in metres
-    floor          : string option         // HA floor name for the area
-    nearestScanner : string option         // scanner with the strongest signal
-    lastSeen       : DateTimeOffset option // when Bermuda last received a BLE advertisement
-    areaLastSeen   : string option         // last area/room the device was seen in
+    lastSeen       : DateTimeOffset option // when Bermuda last received a BLE advertisement (absolute)
+    rawAttrs       : Map<string, string>   // all scalar Bermuda fields, keyed as "bermuda.<field>"
 }
 
 let private validMac (s: string) =
@@ -32,7 +27,7 @@ let private validIrk (s: string) =
     s.Length = 32 && s |> Seq.forall (fun c ->
         (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
 
-let fetchDevices (log: ILogger) (http: HttpClient) : Async<BleDevice list> =
+let fetchDevices (log: ILogger) (http: HttpClient) (debug: bool) : Async<BleDevice list> =
     async {
         let token = Environment.GetEnvironmentVariable("SUPERVISOR_TOKEN")
         if String.IsNullOrEmpty(token) then
@@ -118,8 +113,8 @@ let fetchDevices (log: ILogger) (http: HttpClient) : Async<BleDevice list> =
                                     log.LogDebug("BERMUDA: skipping entry '{key}' — no valid MAC/IRK and no name (address={addr})",
                                         prop.Name, rawAddr)
                                 else
-                                    if macAddr = "" then
-                                        log.LogDebug("BERMUDA: non-MAC entry '{key}' name='{name}' irk={irk} address='{addr}'",
+                                    if macAddr = "" && debug then
+                                        log.LogInformation("BERMUDA DEBUG: non-MAC entry '{key}' name='{name}' irk={irk} address='{addr}'",
                                             prop.Name, name, irkKey, rawAddr)
 
                                     // Nearest scanner: prefer direct field, else derive from scanner_list
@@ -142,18 +137,42 @@ let fetchDevices (log: ILogger) (http: HttpClient) : Async<BleDevice list> =
                                                 |> Option.map fst
                                             else None
 
+                                    let absLastSeen = monoToAbs prop.Name
+
+                                    // Collect all scalar fields generically; skip internal/complex ones
+                                    let rawAttrs =
+                                        [ for p in d.EnumerateObject() do
+                                            if not (p.Name.StartsWith("_")) then
+                                                let v =
+                                                    match p.Value.ValueKind with
+                                                    | JsonValueKind.String -> Some (p.Value.GetString())
+                                                    | JsonValueKind.Number -> Some (p.Value.ToString())
+                                                    | JsonValueKind.True   -> Some "true"
+                                                    | JsonValueKind.False  -> Some "false"
+                                                    | _                    -> None  // skip objects/arrays/null
+                                                match v with
+                                                | Some s -> yield $"bermuda.{p.Name}", s
+                                                | None   -> () ]
+                                        |> Map.ofList
+                                        // Replace raw monotonic last_seen with computed absolute timestamp
+                                        |> (fun m ->
+                                            match absLastSeen with
+                                            | Some dt -> m |> Map.add "bermuda.last_seen" (dt.ToString("o"))
+                                            | None    -> m |> Map.remove "bermuda.last_seen")
+                                        // Add nearest scanner derived from scanner_list if not already present
+                                        |> (fun m ->
+                                            match nearestScanner with
+                                            | Some ns when not (m.ContainsKey("bermuda.nearest_distance_scanner")) ->
+                                                m |> Map.add "bermuda.nearest_distance_scanner" ns
+                                            | _ -> m)
+
                                     yield {
-                                        mac            = macAddr
-                                        irk            = irkKey
-                                        name           = name
-                                        isHome         = str d "zone" = "home"
-                                        rssi           = intProp d "area_rssi"
-                                        area           = strOpt d "area_name"
-                                        distance       = floatProp d "area_distance"
-                                        floor          = strOpt d "floor_name"
-                                        nearestScanner = nearestScanner
-                                        lastSeen       = monoToAbs prop.Name
-                                        areaLastSeen   = strOpt d "area_last_seen"
+                                        mac      = macAddr
+                                        irk      = irkKey
+                                        name     = name
+                                        isHome   = str d "zone" = "home"
+                                        lastSeen = absLastSeen
+                                        rawAttrs = rawAttrs
                                     } ]
 
                     let home = devices |> List.filter (fun d -> d.isHome) |> List.length

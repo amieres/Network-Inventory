@@ -227,6 +227,23 @@ let addAddr (svc: ScanService) : HttpHandler = fun ctx ->
                 | Some dev -> return! okDevice dev ctx
     }
 
+// ── DELETE /api/devices/{id}/addrs/{address} ─────────────────────────────────
+
+let deleteAddr (svc: ScanService) : HttpHandler = fun ctx ->
+    task {
+        let idStr  = routeStr "id"      ctx
+        let addrEnc = routeStr "address" ctx
+        let addr   = Uri.UnescapeDataString(addrEnc)
+        match Guid.TryParse(idStr) with
+        | false, _ -> return! badRequest "Invalid UUID" ctx
+        | true, id ->
+            use conn = svc.GetConnection()
+            Database.deleteAddr conn (string id) addr
+            match Database.getById conn id with
+            | None     -> return! notFound "Device not found" ctx
+            | Some dev -> return! okDevice dev ctx
+    }
+
 // ── POST /api/devices/{id}/addrs/reserve ─────────────────────────────────────
 
 [<CLIMutable>]
@@ -431,6 +448,7 @@ let routes (svc: ScanService) (log: ILogger) : HttpEndpoint list = [
     post   "/api/devices/merge"                    (mergeDevices   svc)
     post   "/api/devices/seed"                     (reseed         svc)
     post   "/api/devices/{id}/addrs"               (addAddr        svc)
+    delete "/api/devices/{id}/addrs/{address}"     (deleteAddr     svc)
     post   "/api/devices/{id}/addrs/reserve"       (reserveAddr    svc)
     post   "/api/devices/{id}/entities"            (addEntity      svc)
     delete "/api/devices/{id}/entities/{entityId}" (removeEntity   svc)

@@ -1,8 +1,10 @@
-const JS_VERSION = 75;
+const JS_VERSION = 87;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
 let allDevices  = [];
+const expandedAttrPrefixes = new Set();
+let selectedDeviceId = null;
 let filter      = {
   text: '',
   categories: new Set(),
@@ -62,7 +64,19 @@ function deviceName(d)  {
       || primaryBt(d)
       || '';
 }
-function deviceModel(d) { return d.model ?? ''; }
+function deviceModelWithSource(d) {
+  if (d.model) return { value: d.model, source: '' };
+  for (const [key, label] of [
+    ['netgear.model',      'Netgear'],
+    ['eero.model',         'Eero'],
+    ['eero.device_type',   'Eero'],
+  ]) {
+    const v = scanAttr(d, key);
+    if (v) return { value: v, source: label };
+  }
+  return { value: '', source: '' };
+}
+function deviceModel(d) { return deviceModelWithSource(d).value; }
 
 // Returns current IPs ordered consistently with orderedMacAddrs for row alignment.
 function orderedCurrentIps(d) {
@@ -151,9 +165,19 @@ function matchesFilter(d) {
 
 // ── Column definitions ───────────────────────────────────────────────────────
 
-function deviceManufacturer(d) {
-  return scanAttr(d, 'eero.manufacturer') || scanAttr(d, 'oui.manufacturer') || scanAttr(d, 'bt.manufacturer') || '';
+function deviceManufacturerWithSource(d) {
+  for (const [key, label] of [
+    ['eero.manufacturer',    'Eero'],
+    ['bermuda.manufacturer', 'Bermuda'],
+    ['oui.manufacturer',     'OUI'],
+    ['bt.manufacturer',      'BT OUI'],
+  ]) {
+    const v = scanAttr(d, key);
+    if (v) return { value: v, source: label };
+  }
+  return { value: '', source: '' };
 }
+function deviceManufacturer(d) { return deviceManufacturerWithSource(d).value; }
 
 const CELL_RENDERERS = {
   online: d => {
@@ -211,15 +235,18 @@ const CELL_RENDERERS = {
         const lock     = pairedIp || a.isReserved
           ? `<button class="${lockCls}" data-device="${d.id}" data-address="${esc(a.address)}" data-reserved-ip="${esc(a.isReserved ? (a.reservedIp ?? '') : pairedIp)}" data-is-reserved="${a.isReserved}" title="${esc(lockTip)}">🔒</button>`
           : '';
-        return `<div style="font-family:monospace;font-size:0.75rem;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;${s}" title="${esc(addrTip(a.source, a.firstSeen, a.lastSeen))}">${addrDot(a, false)}${esc(a.address)}${lock}</div>`;
+        const del  = a.source === 'manual' ? `<button class="addr-del-btn" data-device="${d.id}" data-address="${esc(a.address)}" title="Remove manual address">×</button>` : '';
+        return `<div style="font-family:monospace;font-size:0.75rem;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;${s}" title="${esc(addrTip(a.source, a.firstSeen, a.lastSeen))}">${addrDot(a, false)}${esc(a.address)}${lock}${del}</div>`;
       }),
       ...bts.map(a => {
-        const s = isTransientBt(a.address) ? 'font-style:italic;' : '';
-        return `<div style="font-family:monospace;font-size:0.72rem;color:#38bdf8;overflow:hidden;text-overflow:ellipsis;${s}" title="Bluetooth · ${esc(addrTip(a.source, a.firstSeen, a.lastSeen))}">${addrDot(a, true)}${esc(a.address)}</div>`;
+        const s   = isTransientBt(a.address) ? 'font-style:italic;' : '';
+        const del = a.source === 'manual' ? `<button class="addr-del-btn" data-device="${d.id}" data-address="${esc(a.address)}" title="Remove manual address">×</button>` : '';
+        return `<div style="font-family:monospace;font-size:0.72rem;color:#38bdf8;overflow:hidden;text-overflow:ellipsis;${s}" title="Bluetooth · ${esc(addrTip(a.source, a.firstSeen, a.lastSeen))}">${addrDot(a, true)}${esc(a.address)}${del}</div>`;
       }),
       ...irks.map(a => {
         const abbr = a.address.slice(0, 8) + '…' + a.address.slice(-4);
-        return `<div style="font-family:monospace;font-size:0.72rem;color:#fbbf24;overflow:hidden;text-overflow:ellipsis" title="IRK · ${esc(a.address)} · ${esc(addrTip(a.source, a.firstSeen, a.lastSeen))}">${addrDot(a, false)}${esc(abbr)}</div>`;
+        const del  = a.source === 'manual' ? `<button class="addr-del-btn" data-device="${d.id}" data-address="${esc(a.address)}" title="Remove manual address">×</button>` : '';
+        return `<div style="font-family:monospace;font-size:0.72rem;color:#fbbf24;overflow:hidden;text-overflow:ellipsis" title="IRK · ${esc(a.address)} · ${esc(addrTip(a.source, a.firstSeen, a.lastSeen))}">${addrDot(a, false)}${esc(abbr)}${del}</div>`;
       }),
       ...beacons.map(a => {
         const abbr = a.address.slice(0, 8) + '…' + a.address.slice(-4);
@@ -228,8 +255,8 @@ const CELL_RENDERERS = {
     ];
     return parts.join('') || '<span style="color:#4b5563">—</span>';
   },
-  manufacturer: d => `<span style="font-size:0.78rem">${esc(deviceManufacturer(d))}</span>`,
-  model: d => esc(deviceModel(d)),
+  manufacturer: d => { const m = deviceManufacturerWithSource(d); return m.value ? `<span style="font-size:0.78rem" title="${esc('Source: ' + m.source)}">${esc(m.value)}</span>` : ''; },
+  model: d => { const m = deviceModelWithSource(d); return m.value ? (m.source ? `<span style="font-size:0.78rem" title="${esc('Source: ' + m.source)}">${esc(m.value)}</span>` : esc(m.value)) : ''; },
   webui: d => d.webUiUrl ? `<a href="${d.webUiUrl}" target="_blank" rel="noopener">${esc(d.webUiUrl.replace(/^https?:\/\//, ''))}</a>` : '—',
   firstSeen: d => `<span style="font-size:0.75rem;color:#64748b" title="${d.firstSeen ? esc(new Date(d.firstSeen).toLocaleString()) : ''}">${fmtAge(d.firstSeen)}</span>`,
   lastSeen: d => `<span style="font-size:0.75rem;color:#64748b" title="${d.lastSeen ? esc(new Date(d.lastSeen).toLocaleString()) : ''}">${fmtAge(d.lastSeen)}</span>`,
@@ -475,7 +502,8 @@ function render() {
       const title = (c.id !== 'notes' && c.id !== 'online' && plain) ? ` title="${esc(plain)}"` : '';
       return `<td${cls}${title}>${content}</td>`;
     }).join('');
-    return `<tr data-id="${d.id}">${tds}</tr>`;
+    const sel = d.id === selectedDeviceId ? ' class="row-selected"' : '';
+    return `<tr data-id="${d.id}"${sel}>${tds}</tr>`;
   }).join('');
 }
 
@@ -486,18 +514,36 @@ function renderNotes(d) {
        <button class="note-del" data-device="${d.id}" data-note="${n.id}" title="Delete note">×</button>
      </li>`
   ).join('');
-  const attrs = (d.scanAttrs ?? []).map(a => {
-    const isDateAttr = a.key === 'bermuda.last_seen';
-    const display = isDateAttr ? fmtAge(a.value) : esc(a.value);
-    const tip     = isDateAttr ? ` title="${esc(new Date(a.value).toLocaleString())}"` : '';
-    return `<li class="attr-row"><span class="attr-k">${esc(a.key)}</span><span class="attr-v"${tip}>${display}</span></li>`;
+  const attrGroups = {};
+  for (const a of (d.scanAttrs ?? [])) {
+    const dot    = a.key.indexOf('.');
+    const prefix = dot >= 0 ? a.key.slice(0, dot) : '';
+    (attrGroups[prefix] = attrGroups[prefix] ?? []).push(a);
+  }
+  const attrHtml = Object.entries(attrGroups).map(([prefix, attrs]) => {
+    const expanded = expandedAttrPrefixes.has(prefix);
+    const label    = prefix || 'other';
+    const arrow    = expanded ? '▾' : '▸';
+    const tooltip  = expanded ? '' : ` title="${esc(attrs.map(a => {
+      const shortKey = prefix ? a.key.slice(prefix.length + 1) : a.key;
+      const val = a.key === 'bermuda.last_seen' ? fmtAge(a.value) : a.value;
+      return shortKey + ': ' + val;
+    }).join('\n'))}"`;
+    const header   = `<li class="attr-group-hdr" data-prefix="${esc(prefix)}"${tooltip}>${arrow} ${esc(label)}</li>`;
+    if (!expanded) return header;
+    const rows = attrs.map(a => {
+      const isDateAttr = a.key === 'bermuda.last_seen';
+      const display    = isDateAttr ? fmtAge(a.value) : esc(a.value);
+      const updated    = a.updatedAt ? `updated ${fmtAge(a.updatedAt)}` : '';
+      const valTip     = isDateAttr ? new Date(a.value).toLocaleString() : a.value;
+      const tip        = `title="${esc(valTip + (updated ? '\n' + updated : ''))}"`;
+      const shortKey   = prefix ? a.key.slice(prefix.length + 1) : a.key;
+      return `<li class="attr-row"><span class="attr-k">${esc(shortKey)}</span><span class="attr-v" ${tip}>${display}</span></li>`;
+    }).join('');
+    return header + rows;
   }).join('');
   return `<ul class="note-list">${items}</ul>
-    <div class="note-add">
-      <input type="text" placeholder="Add note…" data-device="${d.id}" />
-      <button data-device="${d.id}">+</button>
-    </div>
-    ${attrs ? `<ul class="attr-list">${attrs}</ul>` : ''}`;
+    ${attrHtml ? `<ul class="attr-list">${attrHtml}</ul>` : ''}`;
 }
 
 function esc(s) {
@@ -538,7 +584,7 @@ async function loadDevices() {
     allDevices.length = 0;
     allDevices.push(...data);
     buildCatBar();
-    render();
+    if (!document.querySelector('.edit-row')) render();
     loadStats();
   } catch (e) {
     console.error('loadDevices:', e);
@@ -733,6 +779,14 @@ function toggleEditRow(id) {
 // ── Notes ─────────────────────────────────────────────────────────────────────
 
 document.getElementById('tbody').addEventListener('click', async e => {
+  // Track selected row
+  const clickedRow = e.target.closest('tr[data-id]');
+  if (clickedRow) {
+    selectedDeviceId = clickedRow.dataset.id;
+    document.querySelectorAll('tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+    clickedRow.classList.add('row-selected');
+  }
+
   // ── Merge mode: intercept all clicks ──
   if (mergeSource) {
     const row = e.target.closest('tr[data-id]');
@@ -815,6 +869,30 @@ document.getElementById('tbody').addEventListener('click', async e => {
     return;
   }
 
+  // Delete manual address
+  const addrDelBtn = e.target.closest('.addr-del-btn');
+  if (addrDelBtn) {
+    const deviceId = addrDelBtn.dataset.device;
+    const address  = addrDelBtn.dataset.address;
+    try {
+      const updated = await api('DELETE', `/api/devices/${deviceId}/addrs/${encodeURIComponent(address)}`);
+      const idx = allDevices.findIndex(x => x.id === deviceId);
+      if (idx >= 0) allDevices[idx] = updated;
+      render();
+    } catch (ex) { console.error('deleteAddr:', ex); }
+    return;
+  }
+
+  // Attr group header — toggle prefix expansion globally
+  const attrHdr = e.target.closest('.attr-group-hdr');
+  if (attrHdr) {
+    const prefix = attrHdr.dataset.prefix;
+    if (expandedAttrPrefixes.has(prefix)) expandedAttrPrefixes.delete(prefix);
+    else expandedAttrPrefixes.add(prefix);
+    render();
+    return;
+  }
+
   // Delete note
   const del = e.target.closest('.note-del');
   if (del) {
@@ -829,28 +907,75 @@ document.getElementById('tbody').addEventListener('click', async e => {
     return;
   }
 
-  // Add note button
-  const addBtn = e.target.closest('.note-add button');
-  if (addBtn) {
-    const row   = addBtn.closest('.note-add');
-    const input = row.querySelector('input');
-    const text  = input.value.trim();
-    if (!text) return;
-    const deviceId = addBtn.dataset.device;
-    try {
-      const updated = await api('POST', `/api/devices/${deviceId}/notes`, { note: text });
-      const idx = allDevices.findIndex(x => x.id === deviceId);
-      if (idx >= 0) allDevices[idx] = updated;
-      render();
-    } catch (ex) { console.error('addNote:', ex); }
-  }
 });
 
-document.getElementById('tbody').addEventListener('keydown', e => {
-  if (e.key !== 'Enter') return;
-  const input = e.target.closest('.note-add input');
-  if (!input) return;
-  input.closest('.note-add').querySelector('button').click();
+
+// ── Add-note modal ────────────────────────────────────────────────────────────
+
+const noteModal      = document.getElementById('note-modal');
+const noteModalInput = document.getElementById('note-modal-input');
+let   noteModalDeviceId = null;
+
+function openNoteModal(deviceId) {
+  noteModalDeviceId    = deviceId;
+  noteModalInput.value = '';
+  noteModal.showModal();
+  noteModalInput.focus();
+}
+
+document.getElementById('note-modal-cancel').addEventListener('click', () => noteModal.close());
+
+document.getElementById('note-modal-add').addEventListener('click', async () => {
+  const text = noteModalInput.value.trim();
+  if (!text || !noteModalDeviceId) return;
+  try {
+    const updated = await api('POST', `/api/devices/${noteModalDeviceId}/notes`, { note: text });
+    const idx = allDevices.findIndex(x => x.id === noteModalDeviceId);
+    if (idx >= 0) allDevices[idx] = updated;
+    noteModal.close();
+    render();
+  } catch (ex) { console.error('addNote:', ex); }
+});
+
+noteModalInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('note-modal-add').click();
+  if (e.key === 'Escape') noteModal.close();
+});
+
+// ── Add-address modal ─────────────────────────────────────────────────────────
+
+const addrModal      = document.getElementById('addr-modal');
+const addrModalInput = document.getElementById('addr-modal-input');
+const addrModalType  = document.getElementById('addr-modal-type');
+let   addrModalDeviceId = null;
+
+function openAddrModal(deviceId) {
+  addrModalDeviceId    = deviceId;
+  addrModalInput.value = '';
+  addrModal.showModal();
+  addrModalInput.focus();
+}
+
+document.getElementById('addr-modal-cancel').addEventListener('click', () => addrModal.close());
+
+document.getElementById('addr-modal-add').addEventListener('click', async () => {
+  const rawAddr = addrModalInput.value.trim();
+  if (!rawAddr || !addrModalDeviceId) return;
+  const typeVal  = addrModalType.value;
+  const addrType = typeVal.startsWith('mac') ? 'mac' : typeVal;
+  const label    = typeVal === 'mac-ethernet' ? 'ethernet' : typeVal === 'mac-wifi' ? 'wifi' : '';
+  try {
+    const updated = await api('POST', `/api/devices/${addrModalDeviceId}/addrs`, { addrType, address: rawAddr, label });
+    const idx = allDevices.findIndex(x => x.id === addrModalDeviceId);
+    if (idx >= 0) allDevices[idx] = updated;
+    addrModal.close();
+    render();
+  } catch (ex) { console.error('addAddr:', ex); alert('Add address failed: ' + ex.message); }
+});
+
+addrModalInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('addr-modal-add').click();
+  if (e.key === 'Escape') addrModal.close();
 });
 
 // ── Scan button ───────────────────────────────────────────────────────────────
@@ -940,6 +1065,9 @@ document.getElementById('tbody').addEventListener('contextmenu', e => {
   }
 
   ctxMenu.innerHTML = `
+    <button data-action="add-note" data-id="${id}">Add note…</button>
+    <button data-action="add-addr" data-id="${id}">Add address…</button>
+    <hr>
     <button data-action="refresh-bermuda" data-id="${id}">Refresh Bermuda</button>
     <button data-action="merge" data-id="${id}">Merge with…</button>
     <hr>
@@ -955,6 +1083,9 @@ ctxMenu.addEventListener('click', async e => {
   if (!btn) return;
   hideCtx();
   const id = btn.dataset.id;
+
+  if (btn.dataset.action === 'add-note') { openNoteModal(id); return; }
+  if (btn.dataset.action === 'add-addr') { openAddrModal(id); return; }
 
   if (btn.dataset.action === 'refresh-bermuda') {
     const row = document.querySelector(`tr[data-id="${id}"]`);

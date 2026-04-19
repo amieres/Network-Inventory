@@ -309,13 +309,47 @@
     }
     .note-add button:hover { background: #4f46e5; }
 
+    .addr-del-btn {
+      background: none; border: none; cursor: pointer; color: #4b5563;
+      font-size: 0.7rem; padding: 0 0.1rem; line-height: 1; vertical-align: middle;
+    }
+    .addr-del-btn:hover { color: #ef4444; }
+    .addr-add-btn {
+      background: none; border: none; cursor: pointer;
+      color: #475569; font-size: 0.78rem; padding: 0 0.15rem;
+      line-height: 1; vertical-align: middle;
+    }
+    .addr-add-btn:hover { color: #7dd3fc; }
+
+    /* ── Add-address dialog ──────────────────────────────────── */
+    #addr-modal { border: 1px solid #2d3048; border-radius: 8px; background: #1a1d2e; color: #e2e8f0; padding: 0; min-width: 320px; }
+    #addr-modal::backdrop { background: rgba(0,0,0,0.6); }
+    .addr-modal-head { padding: 0.75rem 1rem 0.5rem; border-bottom: 1px solid #2d3048; font-size: 0.9rem; }
+    .addr-modal-body { padding: 0.75rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+    .addr-modal-body select, .addr-modal-body input {
+      width: 100%; padding: 0.35rem 0.5rem; border: 1px solid #2d3048; border-radius: 5px;
+      background: #0f1117; color: #e2e8f0; font-size: 0.85rem; font-family: monospace;
+    }
+    .addr-modal-body select { font-family: inherit; }
+    .addr-modal-body input:focus { outline: none; border-color: #0ea5e9; }
+    .addr-modal-foot { padding: 0.5rem 1rem 0.75rem; display: flex; gap: 0.5rem; justify-content: flex-end; }
+    .addr-modal-foot button {
+      padding: 0.3rem 0.8rem; border-radius: 5px; border: none; cursor: pointer; font-size: 0.82rem;
+    }
+    #addr-modal-add    { background: #0c4a6e; color: #7dd3fc; }
+    #addr-modal-add:hover { background: #0284c7; color: #fff; }
+    #addr-modal-cancel { background: #1e293b; color: #94a3b8; }
+    #addr-modal-cancel:hover { background: #334155; color: #e2e8f0; }
+
     /* ── Scan attrs (read-only) ─────────────────────────────── */
     .attr-list {
       list-style: none;
-      margin-top: 0.35em;
-      padding-top: 0.35em;
-      border-top: 1px dashed #2d3048;
     }
+    .attr-group-hdr {
+      font-size: 0.7rem; color: #475569; cursor: pointer; user-select: none;
+      padding: 0.1em 0; margin-top: 0.15em;
+    }
+    .attr-group-hdr:hover { color: #94a3b8; }
     .attr-row {
       display: flex;
       gap: 0.4rem;
@@ -382,6 +416,7 @@
     tr.merge-target    { outline: 2px dashed #7c8cf8; outline-offset: -2px; }
     tr.row-refreshing  { opacity: 0.5; }
     tr.row-flash-ok    { background: #14532d !important; transition: background 1.2s ease; }
+    tr.row-selected    { background: #1e2a45 !important; outline: 1px solid #3b5298; outline-offset: -1px; }
     .merge-banner[hidden] { display: none; }
     .merge-banner {
       padding: 0.5rem 1.5rem; background: #312e81; color: #c7d2fe;
@@ -397,7 +432,7 @@
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v61 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v72 · js <span id="js-version">?</span></span></h1>
   <button id="btn-scan">Scan Now</button>
   <button id="btn-cleanup" title="Purge transient BLE/random-MAC devices older than the specified age">Cleanup</button>
   <input id="cleanup-age" type="number" min="1" value="240" title="Max age in minutes for manual cleanup" style="width:52px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:2px 4px;font-size:0.8rem">
@@ -454,6 +489,38 @@
   </div>
 </div>
 
+<dialog id="note-modal">
+  <form method="dialog">
+    <div class="addr-modal-head"><strong>Add Note</strong></div>
+    <div class="addr-modal-body">
+      <input id="note-modal-input" type="text" placeholder="Note…" />
+    </div>
+    <div class="addr-modal-foot">
+      <button type="button" id="note-modal-add">Add</button>
+      <button type="button" id="note-modal-cancel">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="addr-modal">
+  <form id="addr-form" method="dialog">
+    <div class="addr-modal-head"><strong>Add Address</strong></div>
+    <div class="addr-modal-body">
+      <select id="addr-modal-type">
+        <option value="bluetooth">Bluetooth</option>
+        <option value="mac-wifi">MAC · WiFi</option>
+        <option value="mac-ethernet">MAC · Ethernet</option>
+        <option value="irk">IRK</option>
+      </select>
+      <input id="addr-modal-input" type="text" placeholder="Address…" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="addr-modal-foot">
+      <button type="button" id="addr-modal-add">Add</button>
+      <button type="button" id="addr-modal-cancel">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
 <div id="merge-banner" hidden class="merge-banner">
   <span id="merge-msg"></span>
   <button id="merge-cancel">Cancel</button>
@@ -461,6 +528,6 @@
 
 <div id="ctx-menu" hidden></div>
 
-<script src="app.js?v=75"></script>
+<script src="app.js?v=87"></script>
 </body>
 </html>
