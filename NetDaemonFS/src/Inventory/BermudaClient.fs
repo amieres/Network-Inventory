@@ -159,6 +159,12 @@ let fetchDevices (log: ILogger) (http: HttpClient) (debug: bool) : Async<BleDevi
                                             match absLastSeen with
                                             | Some dt -> m |> Map.add "bermuda.last_seen" (dt.ToString("o"))
                                             | None    -> m |> Map.remove "bermuda.last_seen")
+                                        // Add nearest scanner derived from scanner_list if not already present
+                                        |> (fun m ->
+                                            match nearestScanner with
+                                            | Some ns when not (m.ContainsKey("bermuda.nearest_distance_scanner")) ->
+                                                m |> Map.add "bermuda.nearest_distance_scanner" ns
+                                            | _ -> m)
 
                                     yield {
                                         mac      = macAddr
