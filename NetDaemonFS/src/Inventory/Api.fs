@@ -403,10 +403,14 @@ let cleanup (svc: ScanService) : HttpHandler = fun ctx ->
                 | true, n when n > 0 -> n
                 | _ -> 240
             else 240
+        let purgeAttrs =
+            let q = ctx.Request.Query
+            q.ContainsKey("purgeAttrs") && string q["purgeAttrs"] = "true"
         let cutoff = DateTimeOffset.UtcNow.AddMinutes(-float maxAgeMinutes)
         let purgedDevices = Database.purgeTransientDevices conn cutoff
         let purgedAddrs   = Database.purgeStaleAddresses   conn cutoff
-        return! ok200 {| purgedDevices = purgedDevices; purgedAddresses = purgedAddrs; cutoff = cutoff |} ctx
+        let purgedAttrs   = if purgeAttrs then Database.purgeStaleAttrs conn cutoff else 0
+        return! ok200 {| purgedDevices = purgedDevices; purgedAddresses = purgedAddrs; purgedAttrs = purgedAttrs; cutoff = cutoff |} ctx
     }
 
 // ── GET /api ──────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-const JS_VERSION = 87;
+const JS_VERSION = 88;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -1026,8 +1026,9 @@ btnCleanup.addEventListener('click', async () => {
     btnCleanup.disabled = true;
     btnCleanup.textContent = 'Cleaning…';
     const age = parseInt(document.getElementById('cleanup-age').value) || 240;
-    const res = await api('POST', `/api/cleanup?maxAgeMinutes=${age}`);
-    btnCleanup.textContent = `Purged ${res.purgedDevices}dev ${res.purgedAddresses}addr`;
+    const purgeAttrs = document.getElementById('cleanup-purge-attrs').checked;
+    const res = await api('POST', `/api/cleanup?maxAgeMinutes=${age}${purgeAttrs ? '&purgeAttrs=true' : ''}`);
+    btnCleanup.textContent = `Purged ${res.purgedDevices}dev ${res.purgedAddresses}addr${purgeAttrs ? ` ${res.purgedAttrs}attrs` : ''}`;
     if (res.purgedDevices > 0 || res.purgedAddresses > 0) await loadDevices();
     setTimeout(() => { btnCleanup.textContent = 'Cleanup'; btnCleanup.disabled = false; }, 3000);
   } catch (ex) {
