@@ -874,6 +874,12 @@ let purgeStaleAddresses (conn: SqliteConnection) (cutoff: DateTimeOffset) : int 
     cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("o")) |> ignore
     cmd.ExecuteNonQuery()
 
+let purgeStaleAttrs (conn: SqliteConnection) (cutoff: DateTimeOffset) : int =
+    use cmd = conn.CreateCommand()
+    cmd.CommandText <- "DELETE FROM device_scan_attrs WHERE updated_at < @cutoff"
+    cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("o")) |> ignore
+    cmd.ExecuteNonQuery()
+
 // ── Seed-needed check ─────────────────────────────────────────────────────────
 
 let isDbEmpty (conn: SqliteConnection) : bool =
