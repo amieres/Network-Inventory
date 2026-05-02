@@ -1,4 +1,4 @@
-const JS_VERSION = 88;
+const JS_VERSION = 89;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -1016,6 +1016,20 @@ btnScan.addEventListener('click', async () => {
     scanStatus.textContent = 'Scan queued…';
     if (!pollTimer) pollTimer = setInterval(pollScanStatus, 2000);
   } catch (ex) { console.error('triggerScan:', ex); }
+});
+
+// ── Add Device button ────────────────────────────────────────────────────────
+
+document.getElementById('btn-add-device').addEventListener('click', async () => {
+  try {
+    const dev = await api('POST', '/api/devices');
+    allDevices.unshift(dev);
+    render();
+    toggleEditRow(dev.id);
+    document.querySelector(`tr[data-id="${dev.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch (ex) {
+    console.error('add-device:', ex);
+  }
 });
 
 // ── Cleanup button ───────────────────────────────────────────────────────────

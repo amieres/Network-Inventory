@@ -148,6 +148,34 @@ let getByMac (svc: ScanService) : HttpHandler = fun ctx ->
         | Some dev -> return! okDevice dev ctx
     }
 
+// ── POST /api/devices ────────────────────────────────────────────────────────
+
+let createDevice (svc: ScanService) : HttpHandler = fun ctx ->
+    task {
+        let ts  = DateTimeOffset.UtcNow
+        let id  = Guid.NewGuid()
+        let dev : Device = {
+            id         = id
+            name       = None
+            category   = "Unknown"
+            model      = None
+            webUiUrl   = None
+            haEntities = []
+            isOnline   = false
+            firstSeen  = ts
+            lastSeen   = ts
+            addrs      = []
+            ips        = []
+            notes      = []
+            scanAttrs  = []
+        }
+        use conn = svc.GetConnection()
+        Database.insertDevice conn dev
+        match Database.getById conn id with
+        | None     -> return! notFound "Device not found" ctx
+        | Some dev -> return! okDevice dev ctx
+    }
+
 // ── PUT /api/devices/{id} ─────────────────────────────────────────────────────
 
 let updateDevice (svc: ScanService) : HttpHandler = fun ctx ->
@@ -423,6 +451,7 @@ let apiDescription : HttpHandler = fun ctx ->
         ep "GET"    "/api/devices/{id}"                 "Get device by UUID"
         ep "GET"    "/api/devices/by-ip/{ip}"           "Get device by current IP address"
         ep "GET"    "/api/devices/by-mac/{mac}"         "Get device by MAC address"
+        ep "POST"   "/api/devices"                          "Create a new empty device"
         ep "PUT"    "/api/devices/{id}"                 "Update editable fields: name, category, model, webUiUrl"
         ep "DELETE" "/api/devices/{id}"                 "Delete device and all child rows"
         ep "POST"   "/api/devices/merge"                "Merge two devices: body { keepId, mergeId }"
@@ -447,6 +476,7 @@ let routes (svc: ScanService) (log: ILogger) : HttpEndpoint list = [
     get    "/api/devices/by-ip/{ip}"               (getByIp        svc)
     get    "/api/devices/by-mac/{mac}"             (getByMac       svc)
     get    "/api/devices/{id}"                     (getDevice      svc)
+    post   "/api/devices"                          (createDevice   svc)
     put    "/api/devices/{id}"                     (updateDevice   svc)
     delete "/api/devices/{id}"                     (deleteDevice   svc)
     post   "/api/devices/merge"                    (mergeDevices   svc)

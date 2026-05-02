@@ -836,9 +836,12 @@ let purgeTransientDevices (conn: SqliteConnection) (cutoff: DateTimeOffset) : in
         DELETE FROM devices
         WHERE category = 'Unknown'
           AND last_seen < @cutoff
-          AND id NOT IN (SELECT device_id FROM device_ips)
+          AND id NOT IN (SELECT device_id FROM device_ips WHERE is_current = 1)
           AND id NOT IN (SELECT device_id FROM device_addrs WHERE source = 'manual')
           AND (
+              -- No addresses left (previously cleaned up)
+              NOT EXISTS (SELECT 1 FROM device_addrs WHERE device_id = devices.id)
+              OR
               -- BLE-only: has bluetooth addrs but no MAC addrs
               (    EXISTS (SELECT 1 FROM device_addrs WHERE device_id = devices.id AND addr_type = 'bluetooth')
                AND NOT EXISTS (SELECT 1 FROM device_addrs WHERE device_id = devices.id AND addr_type = 'mac'))
@@ -851,7 +854,7 @@ let purgeTransientDevices (conn: SqliteConnection) (cutoff: DateTimeOffset) : in
                      AND addr_type = 'mac'
                      AND SUBSTR(address, 2, 1) NOT IN ('2','3','6','7','A','a','B','b','E','e','F','f')
                )
-               AND NOT EXISTS (SELECT 1 FROM device_ips WHERE device_id = devices.id))
+               AND NOT EXISTS (SELECT 1 FROM device_ips WHERE device_id = devices.id AND is_current = 1))
           )"""
     cmd.Parameters.AddWithValue("@cutoff", cutoff.ToString("o")) |> ignore
     cmd.ExecuteNonQuery()
