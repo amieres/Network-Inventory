@@ -1,6 +1,6 @@
 RebootRaspi.Config:
   computer: Raspi4
   ipAddress: 192.168.5.60
-  user: !secret amieres
-  pwd:  !secret spa3102
+  user: !secret raspi4_ssh_user
+  pwd:  !secret raspi4_ssh_password
   command: sudo reboot
