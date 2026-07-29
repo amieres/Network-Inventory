@@ -31,6 +31,7 @@
     <Compile Include="src/HelloWorld.fs" />
     <Compile Include="src/Scheduler.fs" />
     <Compile Include="src/HassModel.fs" />
+    <Compile Include="src/EG4Battery.fs" />
     <Compile Include="src/program.fs" />
   </ItemGroup>
 
@@ -66,6 +67,8 @@
       <PackageReference Include="NetDaemon.Extensions.Scheduling" Version="25.18.1"  />
       <PackageReference Include="NetDaemon.Extensions.Logging"    Version="25.18.1"  />
       <PackageReference Include="NetDaemon.Extensions.Tts"        Version="25.18.1"  />
+      <PackageReference Include="NetDaemon.Extensions.Mqtt"       Version="25.18.1"  />
+      <PackageReference Include="MQTTnet"                         Version="4.3.7.1207" />
       <PackageReference Include="SSH.NET"                         Version="2025.0.0" />
       <PackageReference Include="Falco"                           Version="5.2.0"    />
       <PackageReference Include="Microsoft.Data.Sqlite"           Version="9.0.4"    />

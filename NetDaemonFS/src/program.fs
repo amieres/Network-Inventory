@@ -9,6 +9,7 @@ open NetDaemon.HassModel
 open NetDaemon.Extensions.Logging
 open NetDaemon.Extensions.Scheduler
 open NetDaemon.Extensions.Tts
+open NetDaemon.Extensions.MqttEntityManager
 open NetDaemon.Runtime
 open HomeAssistantGenerated
 open Inventory.WebHost
@@ -21,6 +22,7 @@ let [<EntryPoint>] main args =
             .UseNetDaemonDefaultLogging()
             .UseNetDaemonRuntime()
             .UseNetDaemonTextToSpeech()
+            .UseNetDaemonMqttEntityManagement()
             .ConfigureWebHostDefaults(configureWebHost)
             .ConfigureServices(fun ctx services ->
                 services

@@ -4,3 +4,5 @@ RebootRaspi.Config:
   user: !secret amieres
   pwd:  !secret spa3102
   command: sudo reboot
+  switch:  switch.kauf_plug   # Kauf_XX smart plug — power-cycled when SSH is unreachable
+  offSecs: 10
