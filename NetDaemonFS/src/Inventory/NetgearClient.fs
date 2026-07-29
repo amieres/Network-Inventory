@@ -18,12 +18,11 @@ open Microsoft.Extensions.Logging
 //   3. POST /ajax/devices_table_result     → JSON device list
 
 type NetgearDevice = {
-    ip        : string
-    name      : string
-    mac       : string
-    connType  : string   // "Wired" | "2.4G Wireless" | "5G Wireless"
-    ssid      : string
-    signalDbm : int
+    ip       : string
+    name     : string
+    mac      : string
+    connType : string   // "Wired" | "2.4G Wireless" | "5G Wireless"
+    rawAttrs : Map<string, string>
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -49,7 +48,7 @@ let private makePost (http: HttpClient) (auth: string) (url: string) (body: stri
 
 // ── Parse JSON device list ────────────────────────────────────────────────────
 
-let private parseDevices (log: ILogger) (json: string) =
+let private parseDevices (log: ILogger) (debug: bool) (json: string) =
     use doc  = JsonDocument.Parse(json)
     let root = doc.RootElement
     let mutable arr = Unchecked.defaultof<JsonElement>
@@ -63,21 +62,32 @@ let private parseDevices (log: ILogger) (json: string) =
             if el.TryGetProperty(name, &p) && p.ValueKind = JsonValueKind.String
             then p.GetString()
             else ""
-        let intOr (el: JsonElement) (name: string) =
-            let mutable p = Unchecked.defaultof<JsonElement>
-            if el.TryGetProperty(name, &p) then
-                match p.ValueKind with
-                | JsonValueKind.Number -> (let ok, v = p.TryGetInt32() in if ok then v else 0)
-                | JsonValueKind.String -> (let ok, v = Int32.TryParse(p.GetString()) in if ok then v else 0)
-                | _ -> 0
-            else 0
-        [ for el in arr.EnumerateArray() ->
-            { ip       = s el "ip"
-              name     = WebUtility.HtmlDecode(s el "name")
-              mac      = (s el "mac").ToUpperInvariant()
-              connType = s el "connection"
-              ssid     = s el "ssid"
-              signalDbm = intOr el "signal" } ]
+        let devices =
+            [ for el in arr.EnumerateArray() ->
+                let rawAttrs =
+                    [ for p in el.EnumerateObject() do
+                        let v =
+                            match p.Value.ValueKind with
+                            | JsonValueKind.String -> Some (p.Value.GetString())
+                            | JsonValueKind.Number -> Some (p.Value.ToString())
+                            | JsonValueKind.True   -> Some "true"
+                            | JsonValueKind.False  -> Some "false"
+                            | _                    -> None
+                        match v with
+                        | Some sv when sv <> "" -> yield $"netgear.{p.Name}", sv
+                        | _ -> () ]
+                    |> Map.ofList
+                { ip       = s el "ip"
+                  name     = WebUtility.HtmlDecode(s el "name")
+                  mac      = (s el "mac").ToUpperInvariant()
+                  connType = s el "connection"
+                  rawAttrs = rawAttrs } ]
+        if debug then
+            devices |> List.tryFind (fun d -> d.connType <> "Wired" && d.connType <> "")
+            |> Option.iter (fun d ->
+                let fields = d.rawAttrs |> Map.toSeq |> Seq.map (fun (k,v) -> $"{k}={v}") |> String.concat " | "
+                log.LogInformation("NETGEAR DEBUG first wireless device {ip}: {fields}", d.ip, fields))
+        devices
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -86,6 +96,7 @@ let fetchAll
     (http     : HttpClient)
     (host     : string)
     (password : string)
+    (debug    : bool)
     : Async<NetgearDevice list> =
     async {
         try
@@ -125,7 +136,7 @@ let fetchAll
                 log.LogWarning("NETGEAR: unexpected final status {code}", int resp.StatusCode)
                 return []
             else
-                let devices = parseDevices log json
+                let devices = parseDevices log debug json
                 log.LogInformation("NETGEAR: {n} devices found", devices.Length)
                 return devices
         with ex ->

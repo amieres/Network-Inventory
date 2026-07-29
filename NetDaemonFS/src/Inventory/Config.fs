@@ -17,11 +17,17 @@ type EeroConfig() =
 //   services.Configure<InventoryConfig>(config.GetSection("NetworkInventory"))
 // Injected as IOptions<InventoryConfig> wherever needed.
 
+type DebugConfig() =
+    member val Netgear : bool = false with get, set
+    member val Eero    : bool = false with get, set
+    member val Bermuda : bool = false with get, set
+
 type InventoryConfig() =
     member val DbPath       : string   = "./devices.db"                                   with get, set
     member val Subnets      : string[] = [| "192.168.4"; "192.168.5"; "192.168.6" |]     with get, set
-    member val ScanInterval          : int      = 5    with get, set   // minutes between scans
-    member val CleanupMaxAgeMinutes  : int      = 240  with get, set   // purge transient devices not seen in this many minutes
-    member val PingTimeout  : int      = 500  with get, set   // ms per ICMP ping
+    member val ScanInterval          : int      = 5    with get, set
+    member val CleanupMaxAgeMinutes  : int      = 240  with get, set
+    member val PingTimeout  : int      = 500  with get, set
     member val Netgear      : NetgearConfig = NetgearConfig() with get, set
     member val Eero         : EeroConfig    = EeroConfig()    with get, set
+    member val Debug        : DebugConfig   = DebugConfig()   with get, set

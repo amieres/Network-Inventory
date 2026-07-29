@@ -122,17 +122,17 @@ let runScan (src: ScanSources) (conn: SqliteConnection) : Async<int> =
         // ── 1. NETGEAR SOAP ───────────────────────────────────────────────────
         let! netgearDevices =
             if src.cfg.Netgear.Password <> "" then
-                NetgearClient.fetchAll src.log src.http src.cfg.Netgear.Host src.cfg.Netgear.Password
+                NetgearClient.fetchAll src.log src.http src.cfg.Netgear.Host src.cfg.Netgear.Password src.cfg.Debug.Netgear
             else
                 async { return [] }
 
         // ── 2. Bermuda BLE scan ───────────────────────────────────────────────
-        let! bleDevices = BermudaClient.fetchDevices src.log src.http
+        let! bleDevices = BermudaClient.fetchDevices src.log src.http src.cfg.Debug.Bermuda
 
         // ── 3. eero (direct cloud API) ──────────────────────────────────
         let! eeroDevices =
             if src.cfg.Eero.Enabled then
-                EeroClient.getDevices src.log src.http src.cfg
+                EeroClient.getDevices src.log src.http src.cfg src.cfg.Debug.Eero
             else
                 async { return [] }
 
@@ -151,11 +151,11 @@ let runScan (src: ScanSources) (conn: SqliteConnection) : Async<int> =
         // From NETGEAR
         for d in netgearDevices do
             if d.ip <> "" then
-                let isWireless = d.connType.Contains("Wireless")
-                let ngAttrs = List.choose id [
-                    if isWireless then Some { key = "router"; value = "Netgear"; source = "netgear"; updatedAt = ts } else None
-                    attrOf    "netgear" ts "netgear.ssid"       d.ssid
-                    attrOfInt "netgear" ts "netgear.signal_dbm" d.signalDbm
+                let isWireless = d.connType <> "Wired" && d.connType <> ""
+                let ngAttrs = [
+                    if isWireless then yield { key = "router"; value = "Netgear"; source = "netgear"; updatedAt = ts }
+                    for KeyValue(k, v) in d.rawAttrs do
+                        yield { key = k; value = v; source = "netgear"; updatedAt = ts }
                 ]
                 results.[d.ip] <- {
                     ip       = d.ip
@@ -176,14 +176,10 @@ let runScan (src: ScanSources) (conn: SqliteConnection) : Async<int> =
 
         for d in eeroDevices do
             if d.ip <> "" then
-                let eeAttrs = List.choose id [
-                    if d.connType = "wireless" then Some { key = "router"; value = "Eero"; source = "eero"; updatedAt = ts } else None
-                    attrOf    "eero" ts "eero.hostname"     d.hostname
-                    attrOf    "eero" ts "eero.manufacturer" d.manufacturer
-                    attrOf    "eero" ts "eero.connected_to" d.connectedTo
-                    attrOf    "eero" ts "eero.band"         d.band
-                    attrOf    "eero" ts "eero.ssid"         d.ssid
-                    attrOfInt "eero" ts "eero.signal_dbm"   d.signalDbm
+                let eeAttrs = [
+                    if d.connType = "wireless" then yield { key = "router"; value = "Eero"; source = "eero"; updatedAt = ts }
+                    for KeyValue(k, v) in d.rawAttrs do
+                        yield { key = k; value = v; source = "eero"; updatedAt = ts }
                 ]
                 let connType =
                     match d.band with
@@ -218,9 +214,10 @@ let runScan (src: ScanSources) (conn: SqliteConnection) : Async<int> =
                 | None ->
                     match results.TryGetValue(d.ip) with
                     | true, existing ->
+                        let eeroHostname = d.rawAttrs |> Map.tryFind "eero.hostname"
                         let betterHost =
                             match existing.hostname with
-                            | None   -> if d.hostname <> "" then Some d.hostname else None
+                            | None   -> eeroHostname
                             | some   -> some
                         // If eero reports wireless, override connType (eero band is authoritative)
                         let betterConn =
@@ -232,7 +229,7 @@ let runScan (src: ScanSources) (conn: SqliteConnection) : Async<int> =
                         results.[d.ip] <- {
                             ip       = d.ip
                             mac      = eeroMac
-                            hostname = if d.hostname <> "" then Some d.hostname else None
+                            hostname = d.rawAttrs |> Map.tryFind "eero.hostname"
                             connType = connType
                             online   = d.connected
                             attrs    = eeAttrs
@@ -470,44 +467,9 @@ let runScan (src: ScanSources) (conn: SqliteConnection) : Async<int> =
                         firstSeen  = ts
                         lastSeen   = ts
                     }
-                match d.rssi with
-                | Some v ->
+                for KeyValue(key, value) in d.rawAttrs do
                     Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.rssi"; value = string v; source = "bermuda"; updatedAt = ts }
-                | None -> ()
-                if d.name <> "" then
-                    Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.name"; value = d.name; source = "bermuda"; updatedAt = ts }
-                match d.area with
-                | Some a ->
-                    Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.area"; value = a; source = "bermuda"; updatedAt = ts }
-                | None -> ()
-                match d.distance with
-                | Some v ->
-                    Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.distance_m"; value = sprintf "%.2f" v; source = "bermuda"; updatedAt = ts }
-                | None -> ()
-                match d.nearestScanner with
-                | Some s ->
-                    Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.nearest_scanner"; value = s; source = "bermuda"; updatedAt = ts }
-                | None -> ()
-                match d.floor with
-                | Some f ->
-                    Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.floor"; value = f; source = "bermuda"; updatedAt = ts }
-                | None -> ()
-                match d.lastSeen with
-                | Some dt ->
-                    Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.last_seen"; value = dt.ToString("o"); source = "bermuda"; updatedAt = ts }
-                | None -> ()
-                match d.areaLastSeen with
-                | Some s ->
-                    Database.upsertScanAttr conn deviceId
-                        { key = "bermuda.area_last_seen"; value = s; source = "bermuda"; updatedAt = ts }
-                | None -> ()
+                        { key = key; value = value; source = "bermuda"; updatedAt = ts }
                 if d.isHome then
                     Database.appendScanHistory conn deviceId None true
                     deviceCount <- deviceCount + 1

@@ -3,6 +3,7 @@ NetDaemonFS/appsettings.json
 netgear_probe.fsx
 deploy.fsx
 devices.json
+secrets.yaml
 
 # ── Build artifacts ───────────────────────────────────────────────────────────
 **/bin/

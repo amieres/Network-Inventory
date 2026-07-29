@@ -89,7 +89,7 @@ type ScanService
             match Database.getById conn deviceId with
             | None -> return None
             | Some dev ->
-                let! bleDevices = BermudaClient.fetchDevices log client
+                let! bleDevices = BermudaClient.fetchDevices log client false
                 let ts = DateTimeOffset.UtcNow
 
                 // Build lookup sets from device's known addresses
@@ -116,14 +116,7 @@ type ScanService
                         Database.upsertScanAttr conn (string deviceId)
                             { key = key; value = value; source = "bermuda"; updatedAt = ts }
                     for d in matches do
-                        match d.rssi           with Some v -> upsert "bermuda.rssi"             (string v)         | None -> ()
-                        match d.area           with Some v -> upsert "bermuda.area"             v                  | None -> ()
-                        match d.distance       with Some v -> upsert "bermuda.distance_m"       (sprintf "%.2f" v) | None -> ()
-                        match d.nearestScanner with Some v -> upsert "bermuda.nearest_scanner"  v                  | None -> ()
-                        match d.floor          with Some v -> upsert "bermuda.floor"            v                  | None -> ()
-                        match d.areaLastSeen   with Some v -> upsert "bermuda.area_last_seen"   v                  | None -> ()
-                        match d.lastSeen       with Some dt -> upsert "bermuda.last_seen"       (dt.ToString("o")) | None -> ()
-                        if d.name <> "" then upsert "bermuda.name" d.name
+                        for KeyValue(key, value) in d.rawAttrs do upsert key value
                         if d.isHome then Database.setOnlineStatus conn (string deviceId) true
                     log.LogInformation("RefreshBermuda: updated {id} from {n} Bermuda entries", deviceId, matches.Length)
                     return Database.getById conn deviceId

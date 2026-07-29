@@ -148,6 +148,34 @@ let getByMac (svc: ScanService) : HttpHandler = fun ctx ->
         | Some dev -> return! okDevice dev ctx
     }
 
+// ── POST /api/devices ────────────────────────────────────────────────────────
+
+let createDevice (svc: ScanService) : HttpHandler = fun ctx ->
+    task {
+        let ts  = DateTimeOffset.UtcNow
+        let id  = Guid.NewGuid()
+        let dev : Device = {
+            id         = id
+            name       = None
+            category   = "Unknown"
+            model      = None
+            webUiUrl   = None
+            haEntities = []
+            isOnline   = false
+            firstSeen  = ts
+            lastSeen   = ts
+            addrs      = []
+            ips        = []
+            notes      = []
+            scanAttrs  = []
+        }
+        use conn = svc.GetConnection()
+        Database.insertDevice conn dev
+        match Database.getById conn id with
+        | None     -> return! notFound "Device not found" ctx
+        | Some dev -> return! okDevice dev ctx
+    }
+
 // ── PUT /api/devices/{id} ─────────────────────────────────────────────────────
 
 let updateDevice (svc: ScanService) : HttpHandler = fun ctx ->
@@ -225,6 +253,23 @@ let addAddr (svc: ScanService) : HttpHandler = fun ctx ->
                 match Database.getById conn id with
                 | None     -> return! notFound "Device not found" ctx
                 | Some dev -> return! okDevice dev ctx
+    }
+
+// ── DELETE /api/devices/{id}/addrs/{address} ─────────────────────────────────
+
+let deleteAddr (svc: ScanService) : HttpHandler = fun ctx ->
+    task {
+        let idStr  = routeStr "id"      ctx
+        let addrEnc = routeStr "address" ctx
+        let addr   = Uri.UnescapeDataString(addrEnc)
+        match Guid.TryParse(idStr) with
+        | false, _ -> return! badRequest "Invalid UUID" ctx
+        | true, id ->
+            use conn = svc.GetConnection()
+            Database.deleteAddr conn (string id) addr
+            match Database.getById conn id with
+            | None     -> return! notFound "Device not found" ctx
+            | Some dev -> return! okDevice dev ctx
     }
 
 // ── POST /api/devices/{id}/addrs/reserve ─────────────────────────────────────
@@ -386,10 +431,14 @@ let cleanup (svc: ScanService) : HttpHandler = fun ctx ->
                 | true, n when n > 0 -> n
                 | _ -> 240
             else 240
+        let purgeAttrs =
+            let q = ctx.Request.Query
+            q.ContainsKey("purgeAttrs") && string q["purgeAttrs"] = "true"
         let cutoff = DateTimeOffset.UtcNow.AddMinutes(-float maxAgeMinutes)
         let purgedDevices = Database.purgeTransientDevices conn cutoff
         let purgedAddrs   = Database.purgeStaleAddresses   conn cutoff
-        return! ok200 {| purgedDevices = purgedDevices; purgedAddresses = purgedAddrs; cutoff = cutoff |} ctx
+        let purgedAttrs   = if purgeAttrs then Database.purgeStaleAttrs conn cutoff else 0
+        return! ok200 {| purgedDevices = purgedDevices; purgedAddresses = purgedAddrs; purgedAttrs = purgedAttrs; cutoff = cutoff |} ctx
     }
 
 // ── GET /api ──────────────────────────────────────────────────────────────────
@@ -402,6 +451,7 @@ let apiDescription : HttpHandler = fun ctx ->
         ep "GET"    "/api/devices/{id}"                 "Get device by UUID"
         ep "GET"    "/api/devices/by-ip/{ip}"           "Get device by current IP address"
         ep "GET"    "/api/devices/by-mac/{mac}"         "Get device by MAC address"
+        ep "POST"   "/api/devices"                          "Create a new empty device"
         ep "PUT"    "/api/devices/{id}"                 "Update editable fields: name, category, model, webUiUrl"
         ep "DELETE" "/api/devices/{id}"                 "Delete device and all child rows"
         ep "POST"   "/api/devices/merge"                "Merge two devices: body { keepId, mergeId }"
@@ -426,11 +476,13 @@ let routes (svc: ScanService) (log: ILogger) : HttpEndpoint list = [
     get    "/api/devices/by-ip/{ip}"               (getByIp        svc)
     get    "/api/devices/by-mac/{mac}"             (getByMac       svc)
     get    "/api/devices/{id}"                     (getDevice      svc)
+    post   "/api/devices"                          (createDevice   svc)
     put    "/api/devices/{id}"                     (updateDevice   svc)
     delete "/api/devices/{id}"                     (deleteDevice   svc)
     post   "/api/devices/merge"                    (mergeDevices   svc)
     post   "/api/devices/seed"                     (reseed         svc)
     post   "/api/devices/{id}/addrs"               (addAddr        svc)
+    delete "/api/devices/{id}/addrs/{address}"     (deleteAddr     svc)
     post   "/api/devices/{id}/addrs/reserve"       (reserveAddr    svc)
     post   "/api/devices/{id}/entities"            (addEntity      svc)
     delete "/api/devices/{id}/entities/{entityId}" (removeEntity   svc)

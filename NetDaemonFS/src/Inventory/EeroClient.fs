@@ -11,21 +11,17 @@ open Microsoft.Extensions.Logging
 
 [<CLIMutable>]
 type EeroDevice = {
-    mac          : string
-    ip           : string
-    hostname     : string
-    connType     : string   // "wired" | "wireless"
-    band         : string   // "2.4 GHz" | "5 GHz" | "6 GHz" | ""
-    connected    : bool
-    manufacturer : string
-    connectedTo  : string   // eero node name, e.g. "Hallway"
-    signalDbm    : int      // e.g. -43; 0 for wired
-    ssid         : string
+    mac         : string
+    ip          : string
+    connType    : string   // "wired" | "wireless"
+    band        : string   // "2.4 GHz" | "5 GHz" | "6 GHz" | ""
+    connected   : bool
+    rawAttrs    : Map<string, string>
 }
 
 // ── Query Eero cloud API ────────────────────────────────────────────────────
 
-let getDevices (log: ILogger) (http: HttpClient) (cfg: InventoryConfig) : Async<EeroDevice list> =
+let getDevices (log: ILogger) (http: HttpClient) (cfg: InventoryConfig) (debug: bool) : Async<EeroDevice list> =
     async {
         if not cfg.Eero.Enabled || cfg.Eero.SessionCookie = "" || cfg.Eero.NetworkId = "" then
             log.LogDebug("EERO: disabled or missing session/network config, skipping")
@@ -54,12 +50,13 @@ let getDevices (log: ILogger) (http: HttpClient) (cfg: InventoryConfig) : Async<
                     let mutable p = Unchecked.defaultof<JsonElement>
                     if el.TryGetProperty(parent, &p) then str p name else ""
 
-                let intFromSignal (s: string) =
-                    // "−43 dBm" → -43
-                    let cleaned = s.Replace(" dBm", "").Replace("−", "-").Replace("\u2212", "-").Trim()
-                    match Int32.TryParse(cleaned) with
-                    | true, v -> v
-                    | _ -> 0
+                let scalarStr (el: JsonElement) =
+                    match el.ValueKind with
+                    | JsonValueKind.String -> let s = el.GetString() in if s <> "" then Some s else None
+                    | JsonValueKind.Number -> Some (el.ToString())
+                    | JsonValueKind.True   -> Some "true"
+                    | JsonValueKind.False  -> Some "false"
+                    | _                    -> None
 
                 let devices =
                     [ let mutable dataEl = Unchecked.defaultof<JsonElement>
@@ -72,27 +69,47 @@ let getDevices (log: ILogger) (http: HttpClient) (cfg: InventoryConfig) : Async<
                                   let freqUnit = strNested el "interface" "frequency_unit"
                                   let band =
                                       match freq, freqUnit with
-                                      | f, u when f <> "" && u <> "" -> $"{f} {u}"  // "2.4 GHz", "5 GHz", "6 GHz"
+                                      | f, u when f <> "" && u <> "" -> $"{f} {u}"
                                       | _ -> ""
-                                  let connectedEl =
+                                  let connected =
                                       let mutable v = Unchecked.defaultof<JsonElement>
-                                      if el.TryGetProperty("connected", &v) && v.ValueKind = JsonValueKind.True then true
-                                      else false
+                                      el.TryGetProperty("connected", &v) && v.ValueKind = JsonValueKind.True
+
+                                  // Generic scalar capture: top-level + one level of nested objects
+                                  let rawAttrs =
+                                      [ for p in el.EnumerateObject() do
+                                            match scalarStr p.Value with
+                                            | Some s -> yield $"eero.{p.Name}", s
+                                            | None   ->
+                                                if p.Value.ValueKind = JsonValueKind.Object then
+                                                    for child in p.Value.EnumerateObject() do
+                                                        match scalarStr child.Value with
+                                                        | Some s -> yield $"eero.{p.Name}.{child.Name}", s
+                                                        | None   -> ()
+                                        if band <> "" then yield "eero.band", band ]
+                                      |> Map.ofList
+
                                   yield {
-                                      mac          = mac.ToUpperInvariant()
-                                      ip           = ip
-                                      hostname     = str el "hostname"
-                                      connType     = str el "connection_type"
-                                      band         = band
-                                      connected    = connectedEl
-                                      manufacturer = str el "manufacturer"
-                                      connectedTo  = strNested el "source" "location"
-                                      signalDbm    = intFromSignal (strNested el "connectivity" "signal")
-                                      ssid         = str el "ssid"
+                                      mac      = mac.ToUpperInvariant()
+                                      ip       = ip
+                                      connType = str el "connection_type"
+                                      band     = band
+                                      connected = connected
+                                      rawAttrs = rawAttrs
                                   } ]
 
                 let connected = devices |> List.filter (fun d -> d.connected) |> List.length
                 log.LogInformation("EERO: {n} devices ({c} connected)", devices.Length, connected)
+                if debug then
+                    let mutable dataEl2 = Unchecked.defaultof<JsonElement>
+                    if doc.RootElement.TryGetProperty("data", &dataEl2) then
+                        dataEl2.EnumerateArray()
+                        |> Seq.tryFind (fun el ->
+                            let mutable v = Unchecked.defaultof<JsonElement>
+                            el.TryGetProperty("connected", &v) && v.ValueKind = JsonValueKind.True)
+                        |> Option.iter (fun el ->
+                            let keys = el.EnumerateObject() |> Seq.map (fun p -> $"{p.Name}={p.Value}") |> String.concat " | "
+                            log.LogInformation("EERO DEBUG first connected device: {keys}", keys))
                 return devices
             with ex ->
                 log.LogWarning("EERO: fetch failed: {msg}", ex.Message)
