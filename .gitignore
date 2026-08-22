@@ -30,3 +30,18 @@ NetDaemonCS/NetDaemonCodegen/
 *.suo
 .idea/
 *.DS_Store
+
+# ── Secrets: camera RTSP credentials ──────────────────────────────────────────
+# _rtsp.json holds resolved rtsp:// URLs with inline camera passwords, and the
+# go2rtc backups inline the same credentials plus the Kasa basic-auth blobs.
+cast_mock/_rtsp.json
+backups/go2rtc.yaml.bak-*
+go2rtc.yaml
+
+# ── Scratch / captures ────────────────────────────────────────────────────────
+.tmp_*
+.tmp_bluetti/
+cast_mock/*.jpg
+cast_mock/*.png
+__pycache__/
+*.pyc
