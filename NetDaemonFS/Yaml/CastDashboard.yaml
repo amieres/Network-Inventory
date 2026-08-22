@@ -1,0 +1,39 @@
+CastDashboard.Config:
+  # Any number of cameras; the grid shapes itself from `columns` and the count.
+  # Each camera refreshes on its own loop, so adding a slow one does not hold
+  # back the others -- it just updates less often than its neighbours.
+  #
+  # Measured /api/camera_proxy latency (HA transcodes a frame from RTSP per
+  # request, so these are floors, not tuning knobs):
+  #   camera.kasa_garage                    ~2.2s
+  #   camera.kasa_attic                     ~2.2s
+  #   camera.front_door_frontdoorcam        ~3.5s
+  #   camera.driveway_cam_mainstream        ~4.0s
+  #   camera.*_substream                    ~5.4s  (slower despite being smaller)
+  #   camera.amcrest_*_substream1_2         ~8.3s
+  cameras:
+    - camera.driveway_cam_mainstream
+    - camera.front_door_frontdoorcam
+    - camera.kasa_garage
+    - camera.kasa_attic
+
+  mediaPlayer: media_player.game_room_tv   # the `cast` platform entity, not the androidtv_remote _2 one
+  haUrl:  http://192.168.5.70:8123
+  # Long-lived token, used only for /api/camera_proxy snapshot fetches.
+  # Leave blank to fall back to HomeAssistant:Token from appsettings.json.
+  token:  ""
+  selfUrl: http://192.168.5.70:10000       # must be reachable *from the Chromecast*
+
+  columns: 2                               # 4 cameras / 2 columns = 2x2 grid
+  width:  1280
+  height:  720
+
+  refreshSecs: 0                           # 0 = refresh each camera as fast as it answers
+  streamFps:  10                           # fps served on /cast/cameras.mjpeg for go2rtc to transcode
+
+  # The TV plays real H.264 video, not stills: go2rtc pulls the MJPEG endpoint
+  # above and transcodes it (see stream `cameras_grid` in /config/go2rtc.yaml).
+  # Casting MJPEG directly never foregrounds; casting stills flickers on every
+  # reload; go2rtc's stream.m3u8 hands out a new session id per request so the
+  # receiver drops it. Fragmented MP4 is the one that plays.
+  streamUrl: http://192.168.5.70:1984/api/stream.mp4?src=cameras_grid
