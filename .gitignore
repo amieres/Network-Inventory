@@ -34,11 +34,16 @@ NetDaemonCS/NetDaemonCodegen/
 # ── Secrets: camera RTSP credentials ──────────────────────────────────────────
 # _rtsp.json holds resolved rtsp:// URLs with inline camera passwords, and the
 # go2rtc backups inline the same credentials plus the Kasa basic-auth blobs.
+# The whole backups/ dir is local scratch: the configuration.yaml and lovelace
+# dumps carry the same inline credentials, so ignore it wholesale rather than
+# per-pattern.
 cast_mock/_rtsp.json
-backups/go2rtc.yaml.bak-*
+backups/
 go2rtc.yaml
 
 # ── Scratch / captures ────────────────────────────────────────────────────────
+# Session handover notes: working scratch, superseded as each task lands.
+HANDOVER-*.md
 .tmp_*
 .tmp_bluetti/
 cast_mock/*.jpg

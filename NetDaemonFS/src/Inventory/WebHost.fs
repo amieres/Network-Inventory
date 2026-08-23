@@ -23,7 +23,6 @@ let addInventoryServices (cfg: Microsoft.Extensions.Configuration.IConfiguration
     // Register ScanService as both a resolvable singleton and a hosted service
     services.AddSingleton<ScanService>()           |> ignore
     services.AddHostedService<ScanService>(fun sp -> sp.GetRequiredService<ScanService>()) |> ignore
-    CastDashboard.Web.addServices services
 
 /// Configure the Kestrel web application pipeline.
 let configureWebHost (webBuilder: IWebHostBuilder) =
@@ -31,8 +30,6 @@ let configureWebHost (webBuilder: IWebHostBuilder) =
         let sp  = app.ApplicationServices
         let svc = sp.GetRequiredService<ScanService>()
         let log = sp.GetRequiredService<ILogger<ScanService>>()
-
-        CastDashboard.Web.mapEndpoints app
 
         app.UseDefaultFiles()    // serves index.html for /
            .UseStaticFiles()

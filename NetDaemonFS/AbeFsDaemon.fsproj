@@ -15,7 +15,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="src/CastDashboard.fs" />
     <Compile Include="src/Inventory/Domain.fs" />
     <Compile Include="src/Inventory/SeedData.fs" />
     <Compile Include="src/Inventory/Config.fs" />
@@ -72,12 +71,6 @@
       <PackageReference Include="MQTTnet"                         Version="4.3.7.1207" />
       <PackageReference Include="SSH.NET"                         Version="2025.0.0" />
       <PackageReference Include="Falco"                           Version="5.2.0"    />
-      <!-- The NetDaemon add-on container has no libfontconfig, so the regular
-           NativeAssets.Linux build of libSkiaSharp fails to load. The
-           NoDependencies variant is built without the fontconfig/freetype
-           linkage and works in the bare container. -->
-      <PackageReference Include="SkiaSharp"                                     Version="3.116.1" />
-      <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies"   Version="3.116.1" />
       <PackageReference Include="Microsoft.Data.Sqlite"           Version="9.0.4"    />
       <PackageReference Include="FSharp.SystemTextJson"           Version="1.3.13"   />
   </ItemGroup>
