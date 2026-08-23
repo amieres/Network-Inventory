@@ -1,3 +1,7 @@
 EG4Battery.Config:
-  espHost: 192.168.5.219   # eg4-battery-monitor -- set a DHCP reservation for this ESP32-S3 so this doesn't drift
+  # mDNS name, not a literal IP. 2026-08-09: the DHCP lease drifted .219 -> .225 and another device
+  # took over .219, answering ping while refusing 6638 -- so the outage looked exactly like dead
+  # hardware and survived a power cycle of the (perfectly healthy) ESP32. The name tracks the drift.
+  espHost: eg4-battery-monitor.local
+
   espPort: 6638             # stream_server port on the ESP32 (oxan/esphome-stream-server default)

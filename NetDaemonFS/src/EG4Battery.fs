@@ -41,6 +41,7 @@ type BatteryReading =
       PackVoltage : float
       Soh         : float     // percent
       Soc         : float     // percent, read directly from the BMS
+      Balance     : float     // worst cell deviation from the cell average, volts; + = a high cell, - = a low cell
       Alarms      : string[]  // decoded active protection flags, empty when clear
       Alarm       : bool      // true when any alarm/warning bit is set (known or not)
       AlarmText   : string    // "OK" only if no bits set; names for known bits; "unknown" if undecoded bits are set
@@ -118,6 +119,15 @@ module Protocol =
         // BMS reports no remaining-Ah directly; derive it from SOC and full capacity.
         let remainingAh = soc / 100.0 * fullAh
 
+        // Cell balance, matching the measure the Node-RED flow computes for the AC500/AC200
+        // packs: the magnitude is whichever cell deviates furthest from the pack average, and
+        // the sign says which end it came from -- positive when the outlier is a high cell,
+        // negative when it is a low cell. Ties go to the high side (as the AC500 flow does).
+        let balance =
+            let avg = Array.average cells
+            let hi, lo = Array.max cells - avg, avg - Array.min cells
+            if hi >= lo then hi else -lo
+
         // Group 5 alarm word. short1 = protection bits + charge/discharge STATUS
         // (0x01 charging / 0x02 discharging -- normal, not an alarm), short4 = the
         // undocumented warning word (0x0800 SOC low, 0x0040 charging high temp).
@@ -154,6 +164,7 @@ module Protocol =
           PackVoltage = packVoltage
           Soh         = soh
           Soc         = soc
+          Balance     = balance
           Alarms      = alarms
           Alarm       = anyBits
           AlarmText   = alarmText
@@ -257,6 +268,9 @@ type EG4BatteryApp
         createSensor num "mos_temp" "MOS Temperature" "temperature" "°C"
 
         createSensorP num "pack_voltage"      "Pack Voltage"       "voltage" "V"  2
+        // Cells are reported at mV resolution, so keep 3 decimals -- balance is a small
+        // difference and rounding it to 2 would quantise it into uselessly coarse steps.
+        createSensorP num "balance"           "Balance"            "voltage" "V"  3
         createSensor  num "current"            "Current"            "current" "A"
         createSensor  num "remaining_capacity" "Remaining Capacity" null      "Ah"
         createSensor  num "full_capacity"      "Full Capacity"      null      "Ah"
@@ -279,6 +293,7 @@ type EG4BatteryApp
         r.Temps |> Array.iteri (fun i v -> if i < 6 then setSensor num (tempKey i) (inv v))
 
         setSensor num "pack_voltage"       (inv r.PackVoltage)
+        setSensor num "balance"            (inv r.Balance)
         setSensor num "current"            (inv r.Current)
         setSensor num "remaining_capacity" (inv r.RemainingAh)
         setSensor num "full_capacity"      (inv r.FullAh)
