@@ -65,12 +65,41 @@ module Protocol =
     /// response frame. Frame boundaries are found via the length byte
     /// (index 3), not by scanning for 0x0D, since 0x0D can legitimately
     /// appear inside cell-voltage payload bytes.
+    ///
+    /// Both packs share one RS485 bus behind the ESP32's stream_server, so the
+    /// next frame on the socket is NOT necessarily the answer to what we just
+    /// asked: a slow reply or a leftover frame in the TCP buffer used to be
+    /// parsed and published under the wrong battery number (observed live --
+    /// asked addr 2, got addr 1, and battery 1's SOC landed on battery 2's
+    /// sensors). The address byte is authoritative, so verify it and drop any
+    /// frame that doesn't match. Stale frames are skipped rather than treated
+    /// as fatal, so one late reply doesn't poison the following poll.
     let query (stream: NetworkStream) (request: byte[]) : byte[] =
+        let expectedAddr = request.[1]
+
+        // Discard anything left over from a previous (late) reply before asking,
+        // so a stale frame can't be mistaken for this request's answer.
+        while stream.DataAvailable do
+            stream.ReadByte() |> ignore
+
         stream.Write(request, 0, request.Length)
-        let header = readExact stream 4 // 7E, addr, cmd, len
-        let len = int header.[3]
-        let rest = readExact stream (len + 2) // payload + checksum + 0x0D
-        Array.append header rest
+
+        let readFrame () =
+            let header = readExact stream 4 // 7E, addr, cmd, len
+            let len = int header.[3]
+            let rest = readExact stream (len + 2) // payload + checksum + 0x0D
+            Array.append header rest
+
+        // Drain at most a few stale/mismatched frames looking for our own reply;
+        // give up rather than publish another battery's data under this address.
+        let mutable frame = readFrame ()
+        let mutable attempts = 0
+        while frame.[1] <> expectedAddr && attempts < 3 do
+            frame <- readFrame ()
+            attempts <- attempts + 1
+        if frame.[1] <> expectedAddr then
+            failwithf "EG4 battery: expected reply from address %d but got %d" expectedAddr frame.[1]
+        frame
 
     // Protection-flag bits in group 5's second short (low byte). Mapping and the
     // whole group-walking layout come from the reference EG4 driver / powermon:

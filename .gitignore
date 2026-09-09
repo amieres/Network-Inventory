@@ -50,3 +50,13 @@ cast_mock/*.jpg
 cast_mock/*.png
 __pycache__/
 *.pyc
+
+# ── Debugging scratch ─────────────────────────────────────────────────────────
+*.log
+NetDaemonFS/states.json
+NetDaemonFS/lb.json
+NetDaemonFS/p.txt
+NetDaemonFS/probe.txt
+addons.json
+h.json
+thermal_garage_vent.json
