@@ -26,6 +26,11 @@
     <Compile Include="src/Inventory/ScanService.fs" />
     <Compile Include="src/Inventory/Api.fs" />
     <Compile Include="src/Inventory/WebHost.fs" />
+    <Compile Include="src/Health/Domain.fs" />
+    <Compile Include="src/Health/Config.fs" />
+    <Compile Include="src/Health/Rules.fs" />
+    <Compile Include="src/Health/HistoryClient.fs" />
+    <Compile Include="src/Health/HealthService.fs" />
     <Compile Include="src/RebootRaspi.fs" />
     <Compile Include="src/AppModel.fs" />
     <Compile Include="src/HelloWorld.fs" />

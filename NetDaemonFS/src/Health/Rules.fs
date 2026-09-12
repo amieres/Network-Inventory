@@ -1,0 +1,93 @@
+module Health.Rules
+
+open System
+open Health
+
+// ── Entity filter ────────────────────────────────────────────────────────────
+// Domains that never carry a reporting cadence, plus browser_mod (dead browser
+// sessions: 90+ permanently-unavailable entities that would otherwise dominate).
+let private excludedDomains =
+    set [ "automation"; "script"; "scene"; "person"; "zone"; "sun"; "tts"
+          "conversation"; "todo"; "update"; "button"; "input_boolean"
+          "input_number"; "input_select"; "input_text"; "input_datetime" ]
+
+let isCandidate (entityId: string) =
+    let domain = entityId.Split('.').[0]
+    not (excludedDomains.Contains domain) && not (entityId.Contains "browser_mod")
+
+// ── Cadence classification ───────────────────────────────────────────────────
+// Thresholds calibrated against a 120-entity sample (2026-09-11 → 09-12):
+//   55 sparse, 31 event-driven, 24 periodic, 10 bursty.
+// Using the p95 gap rather than the max is essential - the max is usually the
+// outage you are trying to detect (eg4_battery_1_power: median 5 s, p95 13 s,
+// max 228 min, that max being the very stall we want to alarm on).
+let minPoints   = 5
+let periodicP95 = 300.0     // 5 min
+let periodicRatio = 20.0    // p95/median - guards against bursty-but-spiky series
+let burstyP95   = 3600.0    // 1 h
+
+let classify (gapsSeconds: float list) : Cadence =
+    let n = List.length gapsSeconds
+    if n + 1 < minPoints then Sparse (n + 1)
+    else
+        let sorted = List.sort gapsSeconds
+        let arr    = List.toArray sorted
+        let pct p  = arr.[min (arr.Length - 1) (int (float arr.Length * p))]
+        let p95    = pct 0.95
+        let median = pct 0.50
+        let ratio  = if median > 0.0 then p95 / median else infinity
+        if   p95 <= periodicP95 && ratio < periodicRatio then Periodic (p95, median)
+        elif p95 <= burstyP95                            then Bursty   (p95, median)
+        else                                                  Event    p95
+
+// ── Threshold derivation ─────────────────────────────────────────────────────
+// Multiple of p95, floored so fast sensors don't alarm on a single missed beat.
+// eg4_battery_1_power has p95 = 13 s; 4x = 52 s, floored to 3 min. The real
+// stalls on 2026-09-11 ran 3-15 min, so a 3 min floor catches them while leaving
+// room for ordinary jitter.
+let staleMultiplier = 4.0
+let minThreshold    = TimeSpan.FromMinutes 3.0
+let maxThreshold    = TimeSpan.FromHours   6.0
+
+let thresholdFor (cadence: Cadence) : TimeSpan option =
+    match cadence with
+    | Periodic (p95, _) | Bursty (p95, _) ->
+        let t = TimeSpan.FromSeconds(p95 * staleMultiplier)
+        Some (if t < minThreshold then minThreshold elif t > maxThreshold then maxThreshold else t)
+    | Event _ | Sparse _ -> None
+
+// ── What kind of watch (if any) an entity gets ───────────────────────────────
+// `currentState` is the entity's state at learn time.
+//   already unavailable  -> None. It is absent, not failing. 125 entities are in
+//                           this state right now (phones, cars, long-dead kit);
+//                           watching them would alarm forever.
+//   learnable cadence    -> Staleness. Catches the EG4-ESP32 silent-stall class.
+//   no cadence but live  -> Liveness. Catches the RainMachine class, where a
+//                           working device goes straight to `unavailable`.
+let watchFor (cadence: Cadence) (currentState: string) : Watch option =
+    match currentState with
+    | "unavailable" | "unknown" | null -> None
+    | _ ->
+        match thresholdFor cadence with
+        | Some t -> Some (Staleness t)
+        | None   -> Some Liveness
+
+// ── State evaluation ─────────────────────────────────────────────────────────
+// `state` is the raw HA state string; `age` is now - last_updated.
+// Unavailable is a fault under BOTH watch kinds - an entity with a cadence that
+// goes unavailable is just as broken as one without.
+let evaluate (state: string) (age: TimeSpan) (watch: Watch) (lastSeen: DateTimeOffset option) : HealthState =
+    match state with
+    | "unavailable" | "unknown" -> Unavailable lastSeen
+    | _ ->
+        match watch with
+        | Liveness      -> Ok            // it is reporting something; that is all we can ask
+        | Staleness t   -> if age > t then Stale (age, t) else Ok
+
+// ── Fault debounce ───────────────────────────────────────────────────────────
+// Require N consecutive fault observations before reporting, so a single slow
+// poll or a brief broker hiccup doesn't raise an alert. At a 60 s check interval
+// this means a fault is reported ~2 min after it starts.
+let faultConfirmations = 2
+
+let shouldReport (m: Monitor) = m.lastState.isFault && m.faultCount >= faultConfirmations

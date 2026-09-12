@@ -13,6 +13,7 @@ open NetDaemon.Extensions.MqttEntityManager
 open NetDaemon.Runtime
 open HomeAssistantGenerated
 open Inventory.WebHost
+open Health.HealthService
 
 
 let [<EntryPoint>] main args =
@@ -32,6 +33,7 @@ let [<EntryPoint>] main args =
                     .AddHomeAssistantGenerated()
                 |> ignore
                 addInventoryServices ctx.Configuration services
+                addHealthServices    ctx.Configuration services
             )
             .Build()
             .RunAsync()
