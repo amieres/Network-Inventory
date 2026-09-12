@@ -492,13 +492,13 @@
 
     /* ── Diagram ────────────────────────────────────────────── */
     #diagram { margin: 1rem 0 0; }
-    #diagram svg { width: 100%; height: auto; max-height: 420px; background: #0d0f16; border: 1px solid #2d3048; border-radius: 8px; }
+    #diagram svg { width: 100%; height: auto; min-height: 300px; max-height: 60vh; background: #0d0f16; border: 1px solid #2d3048; border-radius: 8px; }
     .n-box   { rx: 5; stroke-width: 1.5; }
     .n-ok    { fill: #132a1c; stroke: #22c55e; }
     .n-fault { fill: #2a1315; stroke: #ef4444; }
     .n-sup   { fill: #2a2413; stroke: #f59e0b; }
-    .n-label { font: 600 10px 'Segoe UI', sans-serif; fill: #e2e8f0; }
-    .n-kind  { font: 9px 'Segoe UI', sans-serif; fill: #64748b; }
+    .n-label { font: 600 11px 'Segoe UI', sans-serif; fill: #e2e8f0; }
+    .n-kind  { font: 9.5px 'Segoe UI', sans-serif; fill: #64748b; }
     .e-power   { stroke: #f59e0b; stroke-width: 1.4; fill: none; }
     .e-network { stroke: #60a5fa; stroke-width: 1.4; fill: none; stroke-dasharray: 4 3; }
     .e-bt-host { stroke: #c084fc; stroke-width: 1.4; fill: none; stroke-dasharray: 2 3; }
@@ -509,7 +509,7 @@
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v74 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v75 · js <span id="js-version">?</span></span></h1>
   <span class="view-tabs">
     <button class="view-tab active" data-view="inventory">Inventory</button>
     <button class="view-tab"        data-view="health">Health</button>
@@ -633,6 +633,6 @@
 <div id="ctx-menu" hidden></div>
 
 <script src="app.js?v=89"></script>
-<script src="health.js?v=4"></script>
+<script src="health.js?v=5"></script>
 </body>
 </html>

@@ -89,6 +89,9 @@ module Topology =
         yield { key = "ssid_abewnetg";     label = "ABEWNETG (NETGEAR RAX80)"; kind = "ap"; device = Some "NETGEAR RAX80"; entity = None; area = None }
         yield { key = "qbit_gar";          label = "Qbit router (garage)";     kind = "ap"; device = None; entity = None; area = Some "Garage" }
         yield { key = "ssid_abewnetg_gar"; label = "ABWNETG_GAR (on Qbit)";    kind = "ap"; device = None; entity = None; area = Some "Garage" }
+        yield { key = "eero";              label = "eero";                     kind = "ap"; device = Some "eero"; entity = None; area = None }
+        yield { key = "modem";             label = "Internet modem";           kind = "modem"; device = None; entity = None; area = Some "Game Room" }
+        yield { key = "game_room";         label = "Game Room (everything)";   kind = "zone"; device = None; entity = None; area = Some "Game Room" }
     ]
 
     let edges : Edge list = [
@@ -115,6 +118,19 @@ module Topology =
         yield { child = "qbit_gar";          parent = "ssid_abewnetg"; kind = Network; note = Some "Qbit uplink to NETGEAR" }
         yield { child = "raspi_zero";        parent = "ssid_abewnetg_gar"; kind = Network; note = None }
         yield { child = "cam_driveway";      parent = "ssid_abewnetg_gar"; kind = Network; note = None }
+        // ── Circuit D is the single point of failure for the whole network ───
+        // The WiFi routers AND the internet modem are plugged into circuit D, as
+        // is everything in the game room. Losing D therefore takes out all WiFi,
+        // all internet, and the game room at once - which would otherwise look
+        // like dozens of unrelated device failures. Circuit D feeds from AC500 #2.
+        yield { child = "ssid_abewnetg"; parent = "circuit_d"; kind = Power; note = Some "NETGEAR on circuit D" }
+        yield { child = "qbit_gar";      parent = "circuit_d"; kind = Power; note = Some "Qbit on circuit D" }
+        yield { child = "eero";          parent = "circuit_d"; kind = Power; note = Some "eero on circuit D" }
+        yield { child = "modem";         parent = "circuit_d"; kind = Power; note = Some "internet modem on circuit D" }
+        yield { child = "game_room";     parent = "circuit_d"; kind = Power; note = Some "whole game room on circuit D" }
+        // The APs route through the modem for internet (not for LAN reachability).
+        yield { child = "ssid_abewnetg"; parent = "modem"; kind = Network; note = Some "WAN uplink" }
+
         // Most smart plugs and sensors are on the main SSID.
         yield { child = "kauf_xx";      parent = "ssid_abewnetg"; kind = Network; note = None }
         yield { child = "shelly_us";    parent = "ssid_abewnetg"; kind = Network; note = None }

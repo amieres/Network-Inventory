@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 4;
+const HEALTH_JS_VERSION = 5;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -157,7 +157,7 @@ function renderDiagram() {
     byDepth.get(dp).push(n);
   });
 
-  const COL_W = 190, ROW_H = 46, BOX_W = 150, BOX_H = 30, PAD = 20;
+  const COL_W = 205, ROW_H = 50, BOX_W = 165, BOX_H = 34, PAD = 22;
   const depths  = Array.from(byDepth.keys());
   const maxRows = Math.max.apply(null, Array.from(byDepth.values()).map(function (a) { return a.length; }));
   const W = (Math.max.apply(null, depths) + 1) * COL_W + PAD * 2;
@@ -194,12 +194,12 @@ function renderDiagram() {
     } else {
       tip = 'healthy';
     }
-    const label = n.label.length > 22 ? n.label.slice(0, 21) + '…' : n.label;
+    const label = n.label.length > 24 ? n.label.slice(0, 23) + '…' : n.label;
     return '<g><title>' + esc(n.label) + ' — ' + esc(tip) + '</title>' +
       '<rect class="n-box ' + cls + '" x="' + p.x + '" y="' + p.y +
         '" width="' + BOX_W + '" height="' + BOX_H + '"/>' +
-      '<text class="n-label" x="' + (p.x + 8) + '" y="' + (p.y + 13) + '">' + esc(label) + '</text>' +
-      '<text class="n-kind"  x="' + (p.x + 8) + '" y="' + (p.y + 24) + '">' + esc(n.kind) + '</text>' +
+      '<text class="n-label" x="' + (p.x + 8) + '" y="' + (p.y + 14) + '">' + esc(label) + '</text>' +
+      '<text class="n-kind"  x="' + (p.x + 8) + '" y="' + (p.y + 26) + '">' + esc(n.kind) + '</text>' +
       '</g>';
   }).join('');
 
