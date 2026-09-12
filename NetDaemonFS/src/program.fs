@@ -3,6 +3,7 @@ module AbeFsDaemon.main
 open System
 open System.Reflection
 open Microsoft.Extensions.Hosting
+open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Logging
 open NetDaemon.AppModel
 open NetDaemon.HassModel
@@ -34,6 +35,11 @@ let [<EntryPoint>] main args =
                 |> ignore
                 addInventoryServices ctx.Configuration services
                 addHealthServices    ctx.Configuration services
+                // Contribute /api/health/* to the Inventory Kestrel pipeline.
+                // Registered here because F# compiles WebHost.fs before Health/.
+                Inventory.WebHost.extraRoutes <-
+                    Inventory.WebHost.extraRoutes @
+                    [ fun sp -> Health.Api.routes (sp.GetRequiredService<Health.HealthService.HealthService>()) ]
             )
             .Build()
             .RunAsync()

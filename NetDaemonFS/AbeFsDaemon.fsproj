@@ -33,6 +33,7 @@
     <Compile Include="src/Health/Registry.fs" />
     <Compile Include="src/Health/HistoryClient.fs" />
     <Compile Include="src/Health/HealthService.fs" />
+    <Compile Include="src/Health/Api.fs" />
     <Compile Include="src/RebootRaspi.fs" />
     <Compile Include="src/AppModel.fs" />
     <Compile Include="src/HelloWorld.fs" />

@@ -341,3 +341,4 @@ let addHealthServices
         .AddHostedService<HealthService>(services, fun sp ->
             Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
                 .GetRequiredService<HealthService>(sp)) |> ignore
+
