@@ -427,12 +427,93 @@
       background: transparent; color: #c7d2fe; cursor: pointer; font-size: 0.78rem;
     }
     .merge-banner button:hover { background: #4f46e5; color: #fff; }
+
+    /* `hidden` is overridden by an explicit `display` on #stats-bar / #cat-bar,
+       so force it - otherwise the inventory filter bars stay visible in the
+       Health view. */
+    [hidden] { display: none !important; }
+
+    /* ── View switcher ──────────────────────────────────────── */
+    .view-tabs { display: inline-flex; gap: 2px; background: #0f1117; border: 1px solid #2d3048; border-radius: 6px; padding: 2px; }
+    .view-tab {
+      padding: 0.25rem 0.7rem; border: none; background: transparent; color: #94a3b8;
+      border-radius: 4px; cursor: pointer; font-size: 0.8rem; font-family: inherit;
+    }
+    .view-tab:hover  { color: #e2e8f0; }
+    .view-tab.active { background: #4f46e5; color: #fff; }
+
+    /* ── Health panel ───────────────────────────────────────── */
+    #health { padding: 0 1.5rem 1rem; overflow: auto; flex: 1; min-height: 0; }
+
+    .h-banner {
+      margin: 0.9rem 0; padding: 0.7rem 0.9rem; border-radius: 6px;
+      border: 1px solid #334155; background: #161a28; font-size: 0.85rem;
+    }
+    .h-banner.good  { border-color: #14532d; background: #0e1a13; color: #86efac; }
+    .h-banner.bad   { border-color: #7f1d1d; background: #1c1113; color: #fca5a5; }
+    .h-banner b     { color: #e2e8f0; }
+    .h-root         { margin-top: 0.45rem; font-size: 0.82rem; color: #cbd5e1; }
+    .h-root code    { color: #fca5a5; }
+
+    .h-stats { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.8rem 0; }
+    .h-stat {
+      display: inline-flex; align-items: baseline; gap: 0.4rem; padding: 0.3rem 0.7rem;
+      border-radius: 6px; border: 1px solid #2d3048; background: #161a28;
+      font-size: 0.78rem; color: #94a3b8; cursor: pointer;
+    }
+    .h-stat b { font-size: 1rem; color: #e2e8f0; font-weight: 600; }
+    .h-stat.active   { border-color: #4f46e5; background: #1e1b4b; }
+    .h-stat.ok     b { color: #4ade80; }
+    .h-stat.stale  b { color: #fbbf24; }
+    .h-stat.unav   b { color: #f87171; }
+    .h-stat.retired b{ color: #64748b; }
+
+    #h-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    #h-table th {
+      text-align: left; padding: 0.45rem 0.6rem; color: #64748b; font-weight: 600;
+      border-bottom: 1px solid #2d3048; position: sticky; top: 0; background: #0f1117;
+      font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    #h-table td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #1b1e2e; }
+    #h-table tr:hover td { background: #161a28; }
+
+    .pill {
+      display: inline-block; padding: 0.1rem 0.5rem; border-radius: 10px;
+      font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+    }
+    .pill.ok          { background: #14532d; color: #86efac; }
+    .pill.stale       { background: #713f12; color: #fde68a; }
+    .pill.unavailable { background: #7f1d1d; color: #fca5a5; }
+    .pill.retired     { background: #1e293b; color: #94a3b8; }
+    .pill.warmup      { background: #1e3a5f; color: #93c5fd; }
+    .h-detail  { color: #94a3b8; font-size: 0.78rem; }
+    .h-sub     { color: #475569; font-size: 0.72rem; }
+    .h-because { color: #f59e0b; font-size: 0.72rem; }
+
+    /* ── Diagram ────────────────────────────────────────────── */
+    #diagram { margin: 1rem 0 0; }
+    #diagram svg { width: 100%; height: auto; max-height: 420px; background: #0d0f16; border: 1px solid #2d3048; border-radius: 8px; }
+    .n-box   { rx: 5; stroke-width: 1.5; }
+    .n-ok    { fill: #132a1c; stroke: #22c55e; }
+    .n-fault { fill: #2a1315; stroke: #ef4444; }
+    .n-sup   { fill: #2a2413; stroke: #f59e0b; }
+    .n-label { font: 600 10px 'Segoe UI', sans-serif; fill: #e2e8f0; }
+    .n-kind  { font: 9px 'Segoe UI', sans-serif; fill: #64748b; }
+    .e-power   { stroke: #f59e0b; stroke-width: 1.4; fill: none; }
+    .e-network { stroke: #60a5fa; stroke-width: 1.4; fill: none; stroke-dasharray: 4 3; }
+    .e-bt-host { stroke: #c084fc; stroke-width: 1.4; fill: none; stroke-dasharray: 2 3; }
+    .e-host    { stroke: #94a3b8; stroke-width: 1.4; fill: none; }
+    .legend    { font: 10px 'Segoe UI', sans-serif; fill: #94a3b8; }
   </style>
 </head>
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v72 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v74 · js <span id="js-version">?</span></span></h1>
+  <span class="view-tabs">
+    <button class="view-tab active" data-view="inventory">Inventory</button>
+    <button class="view-tab"        data-view="health">Health</button>
+  </span>
   <button id="btn-scan">Scan Now</button>
   <button id="btn-add-device" title="Add a device manually">+ Device</button>
   <span style="display:inline-flex;align-items:center;gap:4px">
@@ -474,6 +555,24 @@
     <tbody id="tbody"></tbody>
   </table>
   <div id="empty" hidden>No devices match the current filter.</div>
+</div>
+
+<div id="health" hidden>
+  <div id="h-banner" class="h-banner">Loading health…</div>
+  <div id="h-stats" class="h-stats"></div>
+  <div id="diagram"></div>
+  <table id="h-table">
+    <thead>
+      <tr>
+        <th style="width:34%">Device</th>
+        <th style="width:10%">State</th>
+        <th style="width:14%">Area</th>
+        <th style="width:32%">Detail</th>
+        <th style="width:10%">Entities</th>
+      </tr>
+    </thead>
+    <tbody id="h-tbody"></tbody>
+  </table>
 </div>
 
 <div id="col-modal" hidden>
@@ -534,5 +633,6 @@
 <div id="ctx-menu" hidden></div>
 
 <script src="app.js?v=89"></script>
+<script src="health.js?v=4"></script>
 </body>
 </html>
