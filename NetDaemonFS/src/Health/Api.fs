@@ -77,9 +77,69 @@ let private getDevices (svc: HealthService) : HttpHandler =
 let private getEntities (svc: HealthService) : HttpHandler =
     fun ctx -> Response.ofJson (svc.GetEntityHealth()) ctx
 
+// ── Topology + correlation (drives the diagram) ──────────────────────────────
+
+let private getTopology (svc: HealthService) : HttpHandler =
+    fun ctx ->
+        // A topology node is faulted if the device or entity backing it is.
+        let devHealth = svc.GetDeviceHealth()
+        let byName    = devHealth |> List.map (fun d -> d.name, d) |> Map.ofList
+        let entHealth = svc.GetEntityHealth() |> List.map (fun e -> e.entityId, e.state) |> Map.ofList
+
+        let isFaulted (key: string) =
+            match Topology.nodeByKey |> Map.tryFind key with
+            | None -> false
+            | Some n ->
+                let byDevice =
+                    n.device
+                    |> Option.bind (fun d -> byName |> Map.tryFind d)
+                    |> Option.map  (fun d -> d.state.isFault)
+                let byEntity =
+                    n.entity
+                    |> Option.bind (fun e -> entHealth |> Map.tryFind e)
+                    |> Option.map  (fun s -> s = "stale" || s = "unavailable")
+                // Prefer a direct entity signal, fall back to the device rollup.
+                match byEntity, byDevice with
+                | Some f, _      -> f
+                | None, Some f   -> f
+                | None, None     -> false
+
+        let verdicts = Correlate.analyse isFaulted
+
+        let nodesJ =
+            Topology.nodes
+            |> List.map (fun n ->
+                let v = verdicts |> List.tryFind (fun x -> x.key = n.key)
+                let verdict, because, affected =
+                    match v |> Option.map (fun x -> x.verdict) with
+                    | Some (Correlate.RootCause a)          -> "root-cause", None, a
+                    | Some (Correlate.Suppressed (p, kind)) -> "suppressed", Some $"{p} ({kind.label})", []
+                    | _                                     -> "healthy", None, []
+                {| key      = n.key
+                   label    = n.label
+                   kind     = n.kind
+                   area     = n.area
+                   device   = n.device
+                   entity   = n.entity
+                   faulted  = v |> Option.map (fun x -> x.faulted) |> Option.defaultValue false
+                   verdict  = verdict
+                   because  = because
+                   affected = affected |})
+
+        let edgesJ =
+            Topology.edges
+            |> List.map (fun e -> {| child = e.child; parent = e.parent; kind = e.kind.label; note = e.note |})
+
+        let roots =
+            Correlate.rootCauses verdicts
+            |> List.map (fun (v, affected) -> {| key = v.key; label = v.label; affected = affected |})
+
+        Response.ofJson {| nodes = nodesJ; edges = edgesJ; rootCauses = roots |} ctx
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 let routes (svc: HealthService) : HttpEndpoint list = [
     get "/api/health/devices"  (getDevices  svc)
     get "/api/health/entities" (getEntities svc)
+    get "/api/health/topology" (getTopology svc)
 ]
