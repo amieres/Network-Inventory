@@ -31,6 +31,7 @@
     <Compile Include="src/Health/Rules.fs" />
     <Compile Include="src/Health/Topology.fs" />
     <Compile Include="src/Health/Correlate.fs" />
+    <Compile Include="src/Health/Criteria.fs" />
     <Compile Include="src/Health/Devices.fs" />
     <Compile Include="src/Health/Registry.fs" />
     <Compile Include="src/Health/HistoryClient.fs" />

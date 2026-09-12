@@ -20,6 +20,10 @@ type DeviceHealthJ = {
     liveCount   : int
     staleSecs   : float option    // longest staleness across the device's entities
     entities    : string list
+    /// "device" for a real HA device; "helper" for alerts/templates/integration
+    /// rows that have no device registry entry. The dashboard hides helpers by
+    /// default - they are monitored, but they are not things you can go fix.
+    rowKind     : string
 }
 
 let private fmtAge (t: TimeSpan) =
@@ -51,13 +55,15 @@ let private project (d: Devices.DeviceHealth) : DeviceHealthJ =
       entityCount = d.entityCount
       liveCount   = d.liveCount
       staleSecs   = d.worstAge |> Option.map (fun t -> t.TotalSeconds)
-      entities    = d.entities }
+      entities    = d.entities
+      rowKind     = if Devices.isSynthetic d.deviceId then "helper" else "device" }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
 let private getDevices (svc: HealthService) : HttpHandler =
     fun ctx ->
         let rows = svc.GetDeviceHealth() |> List.map project
+        let realRows = rows |> List.filter (fun r -> r.rowKind = "device")
         let counts =
             rows
             |> List.countBy (fun r -> r.state)
@@ -66,7 +72,9 @@ let private getDevices (svc: HealthService) : HttpHandler =
         let pick k = match counts.TryGetValue k with | true, v -> v | _ -> 0
         Response.ofJson
             {| ready    = svc.IsReady
-               total    = List.length rows
+               total    = List.length realRows
+               totalAll = List.length rows
+               helpers  = (List.length rows) - (List.length realRows)
                ok       = pick "ok"
                stale    = pick "stale"
                unavailable = pick "unavailable"

@@ -494,7 +494,7 @@
 
     /* ── Diagram ────────────────────────────────────────────── */
     #diagram { margin: 1rem 0 0; }
-    #diagram svg { width: 100%; height: auto; min-height: 300px; max-height: 60vh; background: #0d0f16; border: 1px solid #2d3048; border-radius: 8px; }
+    #diagram svg { width: 100%; height: 460px; display: block; background: #0d0f16; border: 1px solid #2d3048; border-radius: 8px; resize: vertical; overflow: auto; }
     .n-box   { rx: 5; stroke-width: 1.5; }
     .n-ok    { fill: #132a1c; stroke: #22c55e; }
     .n-fault { fill: #2a1315; stroke: #ef4444; }
@@ -506,12 +506,28 @@
     .e-bt-host { stroke: #c084fc; stroke-width: 1.4; fill: none; stroke-dasharray: 2 3; }
     .e-host    { stroke: #94a3b8; stroke-width: 1.4; fill: none; }
     .legend    { font: 10px 'Segoe UI', sans-serif; fill: #94a3b8; }
+    .n-blind   { font: 11px 'Segoe UI', sans-serif; fill: #fbbf24; text-anchor: end; }
+
+    /* Diagram is directly manipulable: auto-layout cannot know the physical
+       arrangement, so positions are dragged by the user and persisted. */
+    .diag-toolbar { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.4rem; }
+    .diag-toolbar button {
+      padding: 0.15rem 0.5rem; border: 1px solid #2d3048; background: #161a28;
+      color: #94a3b8; border-radius: 4px; cursor: pointer; font-size: 0.78rem;
+      font-family: inherit; min-width: 26px;
+    }
+    .diag-toolbar button:hover { background: #252840; color: #e2e8f0; }
+    .diag-hint { font-size: 0.72rem; color: #475569; margin-left: 0.3rem; }
+    #diag-svg { cursor: grab; }
+    #diag-svg:active { cursor: grabbing; }
+    .n-g { cursor: move; }
+    .n-g.dragging .n-box { stroke-width: 2.5; }
   </style>
 </head>
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v76 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v78 · js <span id="js-version">?</span></span></h1>
   <span class="view-tabs">
     <button class="view-tab active" data-view="inventory">Inventory</button>
     <button class="view-tab"        data-view="health">Health</button>
@@ -636,6 +652,6 @@
 <div id="ctx-menu" hidden></div>
 
 <script src="app.js?v=89"></script>
-<script src="health.js?v=6"></script>
+<script src="health.js?v=8"></script>
 </body>
 </html>

@@ -25,10 +25,19 @@ type DeviceHealth = {
     entities    : string list       // the monitored ones, for drill-down
 }
 
+/// Entities that belong to no HA device are helpers, template sensors, alerts
+/// and integration-level rows - not physical things. They are still monitored,
+/// but the dashboard should not present them as devices.
+let isSynthetic (deviceId: string) = deviceId.Contains "."
+
 /// Roll per-entity monitors up to one row per device.
-/// `deviceOf` maps entity id -> (deviceId, deviceName, area); entities with no
-/// device (105 of them here - helpers, templates, integration-level sensors) are
-/// grouped under a synthetic device keyed by their own id so nothing is lost.
+/// `deviceOf` maps entity id -> (deviceId, deviceName, area).
+///
+/// Grouping is by NAME, not device id: Bermuda registers its own HA device for
+/// a thing the native integration already registered, so one physical device can
+/// appear twice (e.g. SmartShunt HQ2451Z4HJ3 exists as both the Victron BLE
+/// device and a Bermuda tracker). Merging on name collapses those. Entities with
+/// no device keep their own id so nothing is silently dropped.
 let rollup
     (deviceOf : string -> (string * string * string option) option)
     (monitors : Monitor seq)
@@ -37,8 +46,8 @@ let rollup
     monitors
     |> Seq.groupBy (fun m ->
         match deviceOf m.entityId with
-        | Some (id, name, area) -> id, name, area
-        | None                  -> m.entityId, m.entityId, None)
+        | Some (_, name, area) -> name, name, area     // key on name to merge duplicates
+        | None                 -> m.entityId, m.entityId, None)
     |> Seq.map (fun ((id, name, area), ms) ->
         let ms      = List.ofSeq ms
         let states  = ms |> List.map (fun m -> m.lastState)

@@ -60,6 +60,19 @@ module Topology =
     // need to exist so power edges can point at them.
     let nodes : Node list = [
         // ── Power sources ────────────────────────────────────────────────────
+        // The GRID is a power source in its own right, not just what charges the
+        // batteries. Several devices are plugged straight into mains - AbeVue2,
+        // the EV charger, StudioESP32x and others - so they SURVIVE a battery
+        // failure and, conversely, die in a utility outage while battery-backed
+        // devices keep running. Modelling it is what lets the diagnosis tell
+        // "the grid went out" apart from "a power station failed".
+        // sensor.total_ac_input_power is the live draw-from-grid signal: it read
+        // 0 W on battery and jumped to 1508 W when mains returned on 2026-08-25.
+        yield { key = "grid"; label = "Utility grid (mains)"; kind = "grid"
+                device = None; entity = Some "sensor.total_ac_input_power"; area = None
+                blindSpot = false
+                remedy = Some "Utility outage: battery-backed circuits keep running; mains-only devices (AbeVue2, EV charger, StudioESP32x) are down until power returns" }
+
         yield { key = "ac500_1";      label = "BLUETTI AC500 #1";  kind = "battery"; device = Some "BLUETTI AC500 #1"; entity = Some "binary_sensor.ac500_connected";   area = Some "Garage"; blindSpot = false; remedy = None }
         yield { key = "ac500_2";      label = "BLUETTI AC500 #2";  kind = "battery"; device = Some "BLUETTI AC500 #2"; entity = Some "binary_sensor.ac500_connected_2"; area = Some "Garage"; blindSpot = false; remedy = None }
         yield { key = "ac200m";       label = "BLUETTI AC200M";    kind = "battery"; device = Some "BLUETTI AC200M";   entity = Some "binary_sensor.ac200m_connected";  area = Some "Garage"; blindSpot = false; remedy = None }
@@ -122,6 +135,18 @@ module Topology =
         // itself: the unit can be perfectly healthy and reachable over WiFi while
         // its AC output is off. That is what kills Kauf_XX -> Pi 4 -> all Bluetti
         // BLE data, while the AC500s themselves still answer ping.
+        // Mains-only devices: no battery backup, so they track the grid exactly.
+        yield { key = "abevue2";     label = "AbeVue2 (energy monitor)"; kind = "sensor"
+                device = Some "AbeVue2"; entity = Some "sensor.abevue2_10_oven"; area = None
+                blindSpot = false; remedy = None }
+        yield { key = "ev_charger";  label = "Emporia EV Charger"; kind = "appliance"
+                device = Some "Emporia EV Charger"; entity = None; area = Some "Garage"
+                blindSpot = false; remedy = None }
+        yield { key = "studio_esp32"; label = "StudioESP32x (BT proxy)"; kind = "esp32"
+                device = Some "StudioESP32x"; entity = Some "sensor.studioesp32x_uptime_sensor"; area = Some "Studio"
+                blindSpot = false
+                remedy = Some "On mains, not battery - a utility outage takes it out even when the Bluettis are fine" }
+
         yield { key = "ac500_2_acout"; label = "AC500 #2 AC output"; kind = "outlet"
                 device = None; entity = None; area = Some "Garage"
                 blindSpot = false
@@ -134,6 +159,18 @@ module Topology =
             { child = $"circuit_{c}"; parent = "ac500_1"; kind = Power; note = Some "manual transfer switch" }
         for c in [ "b"; "d"; "f"; "i" ] ->
             { child = $"circuit_{c}"; parent = "ac500_2"; kind = Power; note = Some "manual transfer switch" }
+
+        // ── Power: mains-fed devices ─────────────────────────────────────────
+        // These have no battery backup: they die in a utility outage and survive
+        // a Bluetti failure, which is the opposite of everything on the circuits.
+        yield { child = "abevue2";      parent = "grid"; kind = Power; note = Some "mains only - no battery backup" }
+        yield { child = "ev_charger";   parent = "grid"; kind = Power; note = Some "mains only - no battery backup" }
+        yield { child = "studio_esp32"; parent = "grid"; kind = Power; note = Some "mains only - no battery backup" }
+        // The grid also charges the power stations (AC input), so a long utility
+        // outage eventually drains them - a slow, second-order failure.
+        yield { child = "ac500_1"; parent = "grid"; kind = Power; note = Some "AC input charges the pack" }
+        yield { child = "ac500_2"; parent = "grid"; kind = Power; note = Some "AC input charges the pack" }
+        yield { child = "ac200m";  parent = "grid"; kind = Power; note = Some "AC input charges the pack" }
 
         // ── Power: devices on plugs / battery outputs ────────────────────────
         // The Pi 4 collects Bluetooth data for the Bluettis - if Kauf_XX has WiFi
