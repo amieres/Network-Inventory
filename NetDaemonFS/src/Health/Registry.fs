@@ -38,24 +38,30 @@ let private send (ws: ClientWebSocket) (payload: string) (ct: CancellationToken)
     do! ws.SendAsync(ArraySegment bytes, WebSocketMessageType.Text, true, ct) |> Async.AwaitTask
 }
 
+// The entity-registry response is ~1.1 MB on this system, arriving across many
+// frames. Accumulate BYTES and decode once at the end: decoding each frame
+// separately can split a multi-byte UTF-8 sequence across frame boundaries and
+// corrupt the JSON.
 let private receive (ws: ClientWebSocket) (ct: CancellationToken) = async {
-    let buf = ArrayPool<byte>.Shared.Rent (1 <<< 20)
+    let buf = ArrayPool<byte>.Shared.Rent (64 * 1024)
     try
-        let sb = StringBuilder()
+        use ms = new IO.MemoryStream()
         let mutable go = true
         while go do
             let! r = ws.ReceiveAsync(ArraySegment buf, ct) |> Async.AwaitTask
-            sb.Append(Encoding.UTF8.GetString(buf, 0, r.Count)) |> ignore
-            go <- not r.EndOfMessage
-        return sb.ToString()
+            if r.MessageType = WebSocketMessageType.Close then
+                go <- false
+            else
+                ms.Write(buf, 0, r.Count)
+                go <- not r.EndOfMessage
+        return Encoding.UTF8.GetString(ms.ToArray())
     finally
         ArrayPool<byte>.Shared.Return buf
 }
 
 /// Fetch entity+device+area registries. Returns `empty` on any failure - the
 /// caller degrades to per-entity rows rather than breaking.
-let fetch (log: ILogger) (baseUrl: string) (token: string) : Async<Registries> = async {
-    let wsUrl = baseUrl.Replace("https://", "wss://").Replace("http://", "ws://") + "/api/websocket"
+let fetch (log: ILogger) (wsUrl: string) (token: string) : Async<Registries> = async {
     use ws  = new ClientWebSocket()
     use cts = new CancellationTokenSource(TimeSpan.FromSeconds 45.0)
     let ct  = cts.Token

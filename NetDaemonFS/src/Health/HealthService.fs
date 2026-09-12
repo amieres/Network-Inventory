@@ -69,7 +69,7 @@ type HealthService
 
         // Registry first - it supplies the entity->device map and the platform
         // used to spot orphans. Refreshed each learn so new devices are picked up.
-        let! regs = Registry.fetch log conn.BaseUrl conn.Token
+        let! regs = Registry.fetch log conn.WsUrl conn.ApiToken
         if regs.entities.Count > 0 then registries <- regs
 
         // Candidates: entities with a usable current state, minus excluded domains
@@ -90,7 +90,7 @@ type HealthService
         let mutable skipped   = 0
 
         for batch in candidates |> List.chunkBySize cfg.BatchSize do
-            let! gapsByEntity = HistoryClient.fetchGaps http log conn.BaseUrl conn.Token batch window
+            let! gapsByEntity = HistoryClient.fetchGaps http log conn.BaseUrl conn.ApiToken batch window
             // History only returns entities that have points; anything missing still
             // deserves a liveness watch if it is currently reporting a real value.
             for entityId in batch do

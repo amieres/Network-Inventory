@@ -42,6 +42,8 @@ let fetchGaps
 
             let! body = resp.Content.ReadAsStreamAsync() |> Async.AwaitTask
             use doc   = JsonDocument.Parse(body)
+            log.LogDebug("Health: history parsed {N} series for a batch of {B}",
+                         doc.RootElement.GetArrayLength(), List.length entityIds)
 
             let result =
                 doc.RootElement.EnumerateArray()
@@ -79,6 +81,7 @@ let fetchGaps
 
             return result
         with ex ->
-            log.LogWarning(ex, "Health: history fetch failed for {N} entities", List.length entityIds)
+            log.LogWarning(ex, "Health: history fetch failed for {N} entities: {Msg}",
+                           List.length entityIds, ex.Message)
             return Map.empty
     }
