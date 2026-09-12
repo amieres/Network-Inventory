@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 8;
+const HEALTH_JS_VERSION = 9;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -157,16 +157,78 @@ function renderHealth() {
   renderDiagram();
 }
 
-// ── Dependency diagram ────────────────────────────────────────────────────────
-// Layered layout: depth = longest path from a root (a node with no parents), so
-// power sources and routers sit on the left and dependants flow rightwards.
+// ── Diagram ───────────────────────────────────────────────────────────────────
+// Draws the dependency graph. Deliberately direct-manipulation: an auto-layout
+// cannot know the physical arrangement, so nodes are dragged, snapped to a grid
+// and persisted, and connections can be added by hand.
+
+const GRID = 10;                       // snap step for dragging
+const snap = function (v) { return Math.round(v / GRID) * GRID; };
+
+// Which edge kinds are visible. Electrical / wifi / bluetooth toggled separately
+// because a power problem and a radio problem look nothing alike.
+let layerOn = JSON.parse(localStorage.getItem('healthLayers') || '{"power":true,"network":true,"bt-host":true,"host":true}');
+function saveLayers() { localStorage.setItem('healthLayers', JSON.stringify(layerOn)); }
+
+// User-added connections, kept client-side so the graph can be extended without
+// a redeploy. Merged with the server's edges at render time.
+let userEdges = JSON.parse(localStorage.getItem('healthUserEdges') || '[]');
+function saveUserEdges() { localStorage.setItem('healthUserEdges', JSON.stringify(userEdges)); }
+
+let connectFrom = null;                // node key while adding a connection
+
+// SSID -> colour. Wired and powerline keep the dashed neutral line.
+const LINK_COLOR = {
+  'AbeEero':       '#a78bfa',
+  'ABEWNETG':      '#38bdf8',
+  'ABEWNETG-5G':   '#22d3ee',
+  'ABEWNETG-GAR':  '#fbbf24'
+};
+
+// Compact inline SVG glyphs, drawn at 14x14 from the box's top-left.
+function iconFor(kind, x, y, dim) {
+  const c = dim ? '#475569' : '#cbd5e1';
+  const g = function (inner) {
+    return '<g transform="translate(' + x + ',' + y + ')" fill="none" stroke="' + c +
+           '" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">' + inner + '</g>';
+  };
+  switch (kind) {
+    case 'grid':     return g('<path d="M5 0 L2 6 h4 L3 12"/><path d="M9 1 v10 M11 3 v6"/>');
+    case 'battery':  return g('<rect x="1" y="3" width="10" height="7" rx="1"/><path d="M12 5.5v2"/><path d="M3.5 5.5h3"/>');
+    case 'plug':     return g('<path d="M4 1v3 M8 1v3"/><rect x="2" y="4" width="8" height="4" rx="1"/><path d="M6 8v3"/>');
+    case 'camera':   return g('<rect x="1" y="3" width="8" height="7" rx="1"/><path d="M9 6l3-2v6l-3-2"/>');
+    case 'ap':       return g('<path d="M1 5a7 7 0 0 1 10 0"/><path d="M3.5 7.5a3.5 3.5 0 0 1 5 0"/><circle cx="6" cy="10" r="1"/>');
+    case 'modem':    return g('<rect x="1" y="6" width="10" height="5" rx="1"/><path d="M6 6V2"/><circle cx="3.5" cy="8.5" r=".6"/>');
+    case 'pi':       return g('<rect x="2" y="2" width="8" height="8" rx="1"/><path d="M4 0v2 M8 0v2 M4 10v2 M8 10v2 M0 4h2 M0 8h2 M10 4h2 M10 8h2"/>');
+    case 'computer': return g('<rect x="1" y="2" width="10" height="7" rx="1"/><path d="M4 11h4"/>');
+    case 'esp32':    return g('<rect x="2" y="2" width="8" height="8" rx="1"/><path d="M4 0v2 M8 0v2 M0 5h2 M10 5h2"/>');
+    case 'circuit':  return g('<path d="M2 6h3 l1.5-3 1.5 6 1-3h1.5"/>');
+    case 'ev':       return g('<rect x="1" y="5" width="8" height="4" rx="1"/><path d="M2.5 5l1-2h4l1 2"/><path d="M11 4v4"/>');
+    case 'opener':   return g('<rect x="1" y="4" width="10" height="7" rx="1"/><path d="M1 7h10"/>');
+    case 'host':     return g('<rect x="1" y="2" width="10" height="3" rx="1"/><rect x="1" y="7" width="10" height="3" rx="1"/>');
+    case 'sensor':   return g('<circle cx="6" cy="6" r="4"/><path d="M6 3v3l2 1"/>');
+    case 'zone':     return g('<rect x="1" y="2" width="10" height="8" rx="1"/>');
+    default:         return g('<circle cx="6" cy="6" r="4"/>');
+  }
+}
+
+// WiFi arc tinted by SSID; grey when the radio is down.
+function linkIcon(link, x, y, up) {
+  if (!link) return '';
+  const c = up ? (LINK_COLOR[link] || '#94a3b8') : '#475569';
+  return '<g transform="translate(' + x + ',' + y + ')" fill="none" stroke="' + c +
+         '" stroke-width="1.4" stroke-linecap="round">' +
+         '<path d="M0 4a6 6 0 0 1 8 0"/><path d="M2 6.2a3 3 0 0 1 4 0"/>' +
+         '<circle cx="4" cy="8.4" r=".8" fill="' + c + '" stroke="none"/></g>';
+}
 
 function renderDiagram() {
   const host = document.getElementById('diagram');
   if (!topoData) { host.innerHTML = ''; return; }
 
   const nodes = topoData.nodes;
-  const edges = topoData.edges;
+  const edges = topoData.edges.concat(userEdges);
+  const areas = topoData.areas || [];
 
   function parentsOf(k) {
     return edges.filter(function (e) { return e.child === k; })
@@ -194,10 +256,11 @@ function renderDiagram() {
     byDepth.get(dp).push(n);
   });
 
-  const COL_W = 190, ROW_H = 46, BOX_W = 150, BOX_H = 32, PAD = 18;
+  const COL_W = 210, ROW_H = 54, PAD = 24;
+  // Box size scales with node.size (1 small / 2 normal / 3 large).
+  const boxW = function (n) { return n.size === 1 ? 120 : n.size === 3 ? 190 : 155; };
+  const boxH = function (n) { return n.size === 1 ? 26  : n.size === 3 ? 40  : 32; };
 
-  // Auto-layout is only the starting point; a saved drag always wins, because
-  // the physical arrangement is something only the user knows.
   const pos = new Map();
   byDepth.forEach(function (list, dp) {
     list.forEach(function (n, i) {
@@ -207,75 +270,113 @@ function renderDiagram() {
     });
   });
 
-  const xs = Array.from(pos.values()).map(function (p) { return p.x; });
-  const ys = Array.from(pos.values()).map(function (p) { return p.y; });
-  const W = Math.max.apply(null, xs) + BOX_W + PAD * 2;
-  const H = Math.max.apply(null, ys) + BOX_H + PAD * 2 + 26;
+  const byKey = new Map(nodes.map(function (n) { return [n.key, n]; }));
+  const xs = nodes.map(function (n) { return pos.get(n.key).x + boxW(n); });
+  const ys = nodes.map(function (n) { return pos.get(n.key).y + boxH(n); });
+  const W = Math.max.apply(null, xs) + PAD * 2;
+  const H = Math.max.apply(null, ys) + PAD * 2 + 30;
 
-  function edgePath(e) {
+  // ── Area rectangles: bounding box of each area's nodes ──
+  const areaSvg = areas.map(function (a) {
+    const ns = a.keys.map(function (k) { return byKey.get(k); }).filter(Boolean);
+    if (ns.length < 2) return '';
+    const x1 = Math.min.apply(null, ns.map(function (n) { return pos.get(n.key).x; })) - 10;
+    const y1 = Math.min.apply(null, ns.map(function (n) { return pos.get(n.key).y; })) - 18;
+    const x2 = Math.max.apply(null, ns.map(function (n) { return pos.get(n.key).x + boxW(n); })) + 10;
+    const y2 = Math.max.apply(null, ns.map(function (n) { return pos.get(n.key).y + boxH(n); })) + 10;
+    return '<g class="area-g"><rect class="area-box" x="' + x1 + '" y="' + y1 +
+           '" width="' + (x2 - x1) + '" height="' + (y2 - y1) + '" rx="6"/>' +
+           '<text class="area-label" x="' + (x1 + 8) + '" y="' + (y1 + 12) + '">' + esc(a.name) + '</text></g>';
+  }).join('');
+
+  function edgePath(e, i) {
+    if (!layerOn[e.kind]) return '';
     const a = pos.get(e.parent), b = pos.get(e.child);
-    if (!a || !b) return '';
-    const x1 = a.x + BOX_W, y1 = a.y + BOX_H / 2;
-    const x2 = b.x,         y2 = b.y + BOX_H / 2;
+    const na = byKey.get(e.parent), nb = byKey.get(e.child);
+    if (!a || !b || !na || !nb) return '';
+    const x1 = a.x + boxW(na), y1 = a.y + boxH(na) / 2;
+    const x2 = b.x,            y2 = b.y + boxH(nb) / 2;
     const mx = (x1 + x2) / 2;
-    return '<path class="e-' + e.kind + '" data-child="' + e.child +
-           '" data-parent="' + e.parent + '" d="M' + x1 + ',' + y1 +
+    // Wireless links take the child's SSID colour; wired/powerline stay dashed grey.
+    const wireless = e.kind === 'network' && nb.link;
+    const stroke = wireless ? ' style="stroke:' + (LINK_COLOR[nb.link] || '#94a3b8') + '"' : '';
+    const cls = 'e-' + e.kind + (e.user ? ' e-user' : '') + (wireless ? ' e-wireless' : '');
+    return '<path class="' + cls + '" data-child="' + e.child + '" data-parent="' + e.parent +
+           '" data-i="' + i + '"' + stroke + ' d="M' + x1 + ',' + y1 +
            ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2 + '">' +
-           '<title>' + esc(e.kind) + (e.note ? ': ' + esc(e.note) : '') + '</title></path>';
+           '<title>' + esc(e.kind) + (e.note ? ': ' + esc(e.note) : '') +
+           (e.user ? ' (added by you - click to remove)' : '') + '</title></path>';
   }
 
   function nodeGroup(n) {
     const p = pos.get(n.key);
-    const cls = n.verdict === 'root-cause' ? 'n-fault'
-              : n.verdict === 'suppressed' ? 'n-sup'
+    const w = boxW(n), h = boxH(n);
+    // No power => greyed out entirely. Radio down => only the link icon greys.
+    const noPower = n.powered === false;
+    const cls = noPower                     ? 'n-dead'
+              : n.verdict === 'root-cause'  ? 'n-fault'
+              : n.verdict === 'suppressed'  ? 'n-sup'
               : 'n-ok';
     let tip;
-    if (n.verdict === 'suppressed')      tip = 'suppressed - because ' + n.because;
+    if (noPower)                         tip = 'NO POWER';
+    else if (n.verdict === 'suppressed') tip = 'suppressed - because ' + n.because;
     else if (n.verdict === 'root-cause') tip = 'ROOT CAUSE' + (n.affected.length ? ' - affects ' + n.affected.join(', ') : '');
     else                                 tip = 'healthy';
-    if (n.remedy) tip += ' | ' + n.remedy;
-    const label = n.label.length > 24 ? n.label.slice(0, 23) + '…' : n.label;
+    if (n.outputOn === false) tip += ' | output OFF';
+    if (n.remedy)             tip += ' | ' + n.remedy;
+
+    const maxChars = n.size === 1 ? 14 : n.size === 3 ? 26 : 20;
+    const label = n.label.length > maxChars ? n.label.slice(0, maxChars - 1) + '…' : n.label;
+    const sel = connectFrom === n.key ? ' connect-src' : '';
+
+    // Output-off pip: the device is fine, its OUTPUT is switched off.
+    const outPip = n.outputOn === false
+      ? '<circle class="pip-off" cx="' + (p.x + w - 8) + '" cy="' + (p.y + h - 7) + '" r="3"/>' : '';
     const blind = n.blindSpot
-      ? '<text class="n-blind" x="' + (p.x + BOX_W - 10) + '" y="' + (p.y + 14) + '">◍</text>'
-      : '';
-    return '<g class="n-g" data-key="' + n.key + '">' +
+      ? '<text class="n-blind" x="' + (p.x + w - 6) + '" y="' + (p.y + 11) + '">◍</text>' : '';
+
+    return '<g class="n-g' + sel + '" data-key="' + n.key + '">' +
       '<title>' + esc(n.label) + ' - ' + esc(tip) + '</title>' +
-      '<rect class="n-box ' + cls + '" x="' + p.x + '" y="' + p.y +
-        '" width="' + BOX_W + '" height="' + BOX_H + '"/>' +
-      '<text class="n-label" x="' + (p.x + 8) + '" y="' + (p.y + 14) + '">' + esc(label) + '</text>' +
-      '<text class="n-kind"  x="' + (p.x + 8) + '" y="' + (p.y + 26) + '">' + esc(n.kind) + '</text>' +
-      blind + '</g>';
+      '<rect class="n-box ' + cls + '" x="' + p.x + '" y="' + p.y + '" width="' + w + '" height="' + h + '" rx="5"/>' +
+      iconFor(n.kind, p.x + 6, p.y + (h - 12) / 2, noPower) +
+      '<text class="n-label' + (noPower ? ' dim' : '') + '" x="' + (p.x + 23) + '" y="' + (p.y + (n.size === 1 ? 17 : 14)) + '">' + esc(label) + '</text>' +
+      (n.size === 1 ? '' :
+        '<text class="n-kind" x="' + (p.x + 23) + '" y="' + (p.y + 26) + '">' + esc(n.kind) + '</text>') +
+      linkIcon(n.link, p.x + w - 22, p.y + 4, n.radioUp !== false) +
+      outPip + blind + '</g>';
   }
 
-  const legendItems = [['e-power', 'power'], ['e-network', 'network'],
-                       ['e-bt-host', 'BLE'], ['e-host', 'host']];
-  const legend = legendItems.map(function (L, i) {
-    const x = PAD + i * 110;
-    return '<line class="' + L[0] + '" x1="' + x + '" y1="' + (H - 12) +
-           '" x2="' + (x + 22) + '" y2="' + (H - 12) + '"/>' +
-           '<text class="legend" x="' + (x + 28) + '" y="' + (H - 8) + '">' + L[1] + '</text>';
-  }).join('');
-
   const vb = [diagramPan.x, diagramPan.y, W / diagramZoom, H / diagramZoom].join(' ');
+  const layerBtn = function (k, label) {
+    return '<button class="lyr' + (layerOn[k] ? ' on' : '') + '" data-layer="' + k + '">' + label + '</button>';
+  };
+
   host.innerHTML =
     '<div class="diag-toolbar">' +
-      '<button data-zoom="in"       title="Zoom in">+</button>' +
-      '<button data-zoom="out"      title="Zoom out">&minus;</button>' +
-      '<button data-zoom="reset"    title="Reset zoom and pan">reset view</button>' +
-      '<button data-zoom="relayout" title="Discard dragged positions and auto-layout again">re-layout</button>' +
-      '<span class="diag-hint">drag nodes to arrange &middot; scroll to zoom &middot; drag background to pan</span>' +
+      '<button data-zoom="in" title="Zoom in">+</button>' +
+      '<button data-zoom="out" title="Zoom out">&minus;</button>' +
+      '<button data-zoom="reset" title="Reset zoom and pan">reset view</button>' +
+      '<button data-zoom="relayout" title="Discard dragged positions">re-layout</button>' +
+      '<span class="lyr-sep"></span>' +
+      layerBtn('power', '⚡ power') + layerBtn('network', '📶 wifi/wired') + layerBtn('bt-host', 'ᛒ bluetooth') +
+      '<span class="lyr-sep"></span>' +
+      '<button id="btn-connect" class="' + (connectFrom ? 'on' : '') + '" ' +
+        'title="Click this, then click two nodes to connect them">+ connection</button>' +
+      '<span class="diag-hint">' +
+        (connectFrom ? 'click the PARENT (source) node…' : 'drag nodes · scroll to zoom · ◍ = blind spot') +
+      '</span>' +
     '</div>' +
     '<svg id="diag-svg" viewBox="' + vb + '" preserveAspectRatio="xMinYMin meet" xmlns="http://www.w3.org/2000/svg">' +
+      '<g id="diag-areas">' + areaSvg + '</g>' +
       '<g id="diag-edges">' + edges.map(edgePath).join('') + '</g>' +
       '<g id="diag-nodes">' + nodes.map(nodeGroup).join('') + '</g>' +
-      legend +
     '</svg>';
 
-  wireDiagram(pos, BOX_W, BOX_H, W, H);
+  wireDiagram(pos, byKey, boxW, boxH, W, H);
 }
 
-// ── Diagram interaction: drag nodes, zoom, pan ────────────────────────────────
-function wireDiagram(pos, BOX_W, BOX_H, W, H) {
+// ── Diagram interaction: drag (grid-snapped), zoom, pan, layers, connect ─────
+function wireDiagram(pos, byKey, boxW, boxH, W, H) {
   const svg = document.getElementById('diag-svg');
   if (!svg) return;
 
@@ -290,8 +391,23 @@ function wireDiagram(pos, BOX_W, BOX_H, W, H) {
     });
   });
 
-  // Convert a mouse event to SVG user units so dragging tracks the cursor at
-  // any zoom level.
+  // Layer visibility: electrical, wifi/wired and bluetooth are independent
+  // because a power fault and a radio fault look nothing alike.
+  document.querySelectorAll('[data-layer]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      const k = b.dataset.layer;
+      layerOn[k] = !layerOn[k];
+      saveLayers();
+      renderDiagram();
+    });
+  });
+
+  const cbtn = document.getElementById('btn-connect');
+  if (cbtn) cbtn.addEventListener('click', function () {
+    connectFrom = connectFrom ? null : '__await__';
+    renderDiagram();
+  });
+
   function toSvg(evt) {
     const r = svg.getBoundingClientRect();
     const vbw = W / diagramZoom, vbh = H / diagramZoom;
@@ -306,35 +422,79 @@ function wireDiagram(pos, BOX_W, BOX_H, W, H) {
       [diagramPan.x, diagramPan.y, W / diagramZoom, H / diagramZoom].join(' '));
   }
 
-  // Live geometry update while dragging, without a full re-render.
   function redrawPositions() {
     Object.keys(nodePos).forEach(function (k) { pos.set(k, nodePos[k]); });
     document.querySelectorAll('.n-g').forEach(function (g) {
+      const n = byKey.get(g.dataset.key);
       const p = pos.get(g.dataset.key);
-      if (!p) return;
+      if (!p || !n) return;
+      const w = boxW(n), h = boxH(n);
       const rect = g.querySelector('rect');
+      rect.setAttribute('x', p.x); rect.setAttribute('y', p.y);
+      // Icon, labels and badges all hang off the box origin.
+      const icon = g.querySelector('g');
+      if (icon) icon.setAttribute('transform', 'translate(' + (p.x + 6) + ',' + (p.y + (h - 12) / 2) + ')');
       const txts = g.querySelectorAll('text');
-      rect.setAttribute('x', p.x);
-      rect.setAttribute('y', p.y);
-      if (txts[0]) { txts[0].setAttribute('x', p.x + 8);         txts[0].setAttribute('y', p.y + 14); }
-      if (txts[1]) { txts[1].setAttribute('x', p.x + 8);         txts[1].setAttribute('y', p.y + 26); }
-      if (txts[2]) { txts[2].setAttribute('x', p.x + BOX_W - 10); txts[2].setAttribute('y', p.y + 14); }
+      let ti = 0;
+      if (txts[ti] && !txts[ti].classList.contains('n-blind')) {
+        txts[ti].setAttribute('x', p.x + 23);
+        txts[ti].setAttribute('y', p.y + (n.size === 1 ? 17 : 14)); ti++;
+      }
+      if (txts[ti] && txts[ti].classList.contains('n-kind')) {
+        txts[ti].setAttribute('x', p.x + 23); txts[ti].setAttribute('y', p.y + 26); ti++;
+      }
+      const blindT = g.querySelector('.n-blind');
+      if (blindT) { blindT.setAttribute('x', p.x + w - 6); blindT.setAttribute('y', p.y + 11); }
+      const pip = g.querySelector('.pip-off');
+      if (pip) { pip.setAttribute('cx', p.x + w - 8); pip.setAttribute('cy', p.y + h - 7); }
     });
     document.querySelectorAll('#diag-edges path').forEach(function (path) {
-      const a = pos.get(path.dataset.parent), b = pos.get(path.dataset.child);
-      if (!a || !b) return;
-      const x1 = a.x + BOX_W, y1 = a.y + BOX_H / 2;
-      const x2 = b.x,         y2 = b.y + BOX_H / 2;
+      const na = byKey.get(path.dataset.parent), nb = byKey.get(path.dataset.child);
+      const a = pos.get(path.dataset.parent),    b = pos.get(path.dataset.child);
+      if (!a || !b || !na || !nb) return;
+      const x1 = a.x + boxW(na), y1 = a.y + boxH(na) / 2;
+      const x2 = b.x,            y2 = b.y + boxH(nb) / 2;
       const mx = (x1 + x2) / 2;
       path.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 +
                              ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2);
     });
   }
 
+  // Click a user-added edge to remove it.
+  svg.addEventListener('click', function (evt) {
+    const p = evt.target.closest ? evt.target.closest('.e-user') : null;
+    if (!p) return;
+    const i = parseInt(p.dataset.i, 10) - topoData.edges.length;
+    if (i >= 0 && i < userEdges.length) {
+      userEdges.splice(i, 1);
+      saveUserEdges();
+      renderDiagram();
+    }
+  });
+
   let drag = null;
 
   svg.addEventListener('mousedown', function (evt) {
     const g = evt.target.closest ? evt.target.closest('.n-g') : null;
+
+    // Connection mode: first click picks the parent, second the child.
+    if (connectFrom && g) {
+      const key = g.dataset.key;
+      if (connectFrom === '__await__') {
+        connectFrom = key;
+      } else if (connectFrom !== key) {
+        const kind = prompt('Connection type: power, network or bt-host', 'power');
+        if (kind && ['power', 'network', 'bt-host', 'host'].indexOf(kind) >= 0) {
+          userEdges.push({ child: key, parent: connectFrom, kind: kind, note: 'added by you', user: true });
+          saveUserEdges();
+        }
+        connectFrom = null;
+      }
+      renderDiagram();
+      evt.preventDefault();
+      return;
+    }
+
     const p = toSvg(evt);
     if (g) {
       const key = g.dataset.key;
@@ -351,7 +511,8 @@ function wireDiagram(pos, BOX_W, BOX_H, W, H) {
     if (!drag) return;
     const p = toSvg(evt);
     if (drag.kind === 'node') {
-      nodePos[drag.key] = { x: Math.round(p.x - drag.dx), y: Math.round(p.y - drag.dy) };
+      // Snap to a grid so hand-arranged layouts stay tidy.
+      nodePos[drag.key] = { x: snap(p.x - drag.dx), y: snap(p.y - drag.dy) };
       redrawPositions();
     } else {
       diagramPan.x = drag.px - (p.x - drag.x0);

@@ -495,16 +495,35 @@
     /* ── Diagram ────────────────────────────────────────────── */
     #diagram { margin: 1rem 0 0; }
     #diagram svg { width: 100%; height: 460px; display: block; background: #0d0f16; border: 1px solid #2d3048; border-radius: 8px; resize: vertical; overflow: auto; }
-    .n-box   { rx: 5; stroke-width: 1.5; }
+    .n-box   { stroke-width: 1.5; }
     .n-ok    { fill: #132a1c; stroke: #22c55e; }
     .n-fault { fill: #2a1315; stroke: #ef4444; }
     .n-sup   { fill: #2a2413; stroke: #f59e0b; }
+    /* No power: greyed out entirely - a dead box reads differently from a fault. */
+    .n-dead  { fill: #15171d; stroke: #3f4250; }
     .n-label { font: 600 11px 'Segoe UI', sans-serif; fill: #e2e8f0; }
-    .n-kind  { font: 9.5px 'Segoe UI', sans-serif; fill: #64748b; }
+    .n-label.dim { fill: #64748b; }
+    .n-kind  { font: 9px 'Segoe UI', sans-serif; fill: #64748b; }
+    .n-blind { font: 11px 'Segoe UI', sans-serif; fill: #fbbf24; text-anchor: end; }
+    .pip-off { fill: #f87171; }
     .e-power   { stroke: #f59e0b; stroke-width: 1.4; fill: none; }
-    .e-network { stroke: #60a5fa; stroke-width: 1.4; fill: none; stroke-dasharray: 4 3; }
+    .e-network { stroke: #94a3b8; stroke-width: 1.4; fill: none; stroke-dasharray: 5 3; }
+    .e-network.e-wireless { stroke-dasharray: none; }
     .e-bt-host { stroke: #c084fc; stroke-width: 1.4; fill: none; stroke-dasharray: 2 3; }
     .e-host    { stroke: #94a3b8; stroke-width: 1.4; fill: none; }
+    .e-user    { stroke-dasharray: 1 3; cursor: pointer; }
+    .e-user:hover { stroke-width: 3; }
+    /* Area grouping rectangles */
+    .area-box   { fill: rgba(124,140,248,0.045); stroke: #2d3048; stroke-dasharray: 4 4; }
+    .area-label { font: 600 9px 'Segoe UI', sans-serif; fill: #5b6478; text-transform: uppercase; letter-spacing: 0.06em; }
+    .n-g.connect-src .n-box { stroke: #7c8cf8; stroke-width: 3; }
+    .lyr-sep { width: 1px; height: 16px; background: #2d3048; margin: 0 0.2rem; }
+    .diag-toolbar button.lyr { opacity: 0.45; }
+    .diag-toolbar button.lyr.on, .diag-toolbar button.on { opacity: 1; border-color: #4f46e5; color: #c7d2fe; }
+    .diag-legend { margin-top: 0.4rem; font-size: 0.72rem; color: #64748b; line-height: 1.6; }
+    .diag-legend b { color: #fbbf24; }
+    .lg-dead { color: #3f4250; }
+    .lg-pip  { color: #f87171; }
     .legend    { font: 10px 'Segoe UI', sans-serif; fill: #94a3b8; }
     .n-blind   { font: 11px 'Segoe UI', sans-serif; fill: #fbbf24; text-anchor: end; }
 
@@ -527,7 +546,7 @@
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v78 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v79 · js <span id="js-version">?</span></span></h1>
   <span class="view-tabs">
     <button class="view-tab active" data-view="inventory">Inventory</button>
     <button class="view-tab"        data-view="health">Health</button>
@@ -580,6 +599,17 @@
   <div id="h-blind" class="h-banner" hidden></div>
   <div id="h-stats" class="h-stats"></div>
   <div id="diagram"></div>
+  <div class="diag-legend">
+    <b>◍</b> blind spot — its failure also takes Home Assistant down, so nothing would be reported ·
+    <span class="lg-dead">grey box</span> = no power ·
+    <span class="lg-pip">●</span> output switched off ·
+    grey radio icon = no wifi/bluetooth ·
+    SSID: <span style="color:#a78bfa">AbeEero</span>
+    <span style="color:#38bdf8">ABEWNETG</span>
+    <span style="color:#22d3ee">ABEWNETG-5G</span>
+    <span style="color:#fbbf24">ABEWNETG-GAR</span> ·
+    dashed grey = wired/powerline
+  </div>
   <table id="h-table">
     <thead>
       <tr>
@@ -652,6 +682,6 @@
 <div id="ctx-menu" hidden></div>
 
 <script src="app.js?v=89"></script>
-<script src="health.js?v=8"></script>
+<script src="health.js?v=9"></script>
 </body>
 </html>

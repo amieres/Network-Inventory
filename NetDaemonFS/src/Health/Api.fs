@@ -114,6 +114,33 @@ let private getTopology (svc: HealthService) : HttpHandler =
 
         let verdicts = Correlate.analyse isFaulted
 
+        // Raw entity states, for output/link indicators.
+        let entRaw = svc.GetRawStates()
+
+        // A node has no power when an ancestor power-edge parent is faulted, or
+        // when the plug/station feeding it reports its output off.
+        let outputOffOf (key: string) =
+            Topology.nodeByKey
+            |> Map.tryFind key
+            |> Option.bind (fun n -> n.outputEntity)
+            |> Option.map (fun e ->
+                 match entRaw |> Map.tryFind e with
+                 | Some v ->
+                     let v = v.ToLowerInvariant()
+                     v = "off" || v = "0"
+                 | None -> false)
+            |> Option.defaultValue false
+
+        let poweredOff (key: string) =
+            Topology.edges
+            |> List.filter (fun e -> e.child = key && e.kind = Power)
+            |> List.exists (fun e -> isFaulted e.parent || outputOffOf e.parent)
+
+        let radioDown (key: string) =
+            Topology.edges
+            |> List.filter (fun e -> e.child = key && (e.kind = Network || e.kind = BtHost))
+            |> List.exists (fun e -> isFaulted e.parent)
+
         let nodesJ =
             Topology.nodes
             |> List.map (fun n ->
@@ -134,7 +161,24 @@ let private getTopology (svc: HealthService) : HttpHandler =
                    because  = because
                    affected = affected
                    blindSpot = n.blindSpot
-                   remedy    = n.remedy |})
+                   remedy    = n.remedy
+                   size      = n.size
+                   link      = n.link
+                   // Output state: a station or plug can be healthy while its
+                   // output is switched OFF, which is a different failure from
+                   // the device itself being down.
+                   outputOn  =
+                     n.outputEntity
+                     |> Option.map (fun e ->
+                          match entRaw |> Map.tryFind e with
+                          | Some v ->
+                              let v = v.ToLowerInvariant()
+                              not (v = "off" || v = "0" || v = "unavailable" || v = "unknown")
+                          | None -> true)
+                   // Powered / radio-up, so the UI can grey out the box or the
+                   // radio icon independently.
+                   powered   = not (poweredOff n.key)
+                   radioUp   = not (radioDown n.key) |})
 
         let edgesJ =
             Topology.edges
@@ -156,7 +200,15 @@ let private getTopology (svc: HealthService) : HttpHandler =
             |> List.filter (fun n -> n.blindSpot)
             |> List.map (fun n -> {| key = n.key; label = n.label; remedy = n.remedy |})
 
-        Response.ofJson {| nodes = nodesJ; edges = edgesJ; rootCauses = roots; blindSpots = blindSpots |} ctx
+        // Areas, so the diagram can draw grouping rectangles.
+        let areas =
+            Topology.nodes
+            |> List.choose (fun n -> n.area |> Option.map (fun a -> a, n.key))
+            |> List.groupBy fst
+            |> List.map (fun (a, xs) -> {| name = a; keys = xs |> List.map snd |})
+
+        Response.ofJson {| nodes = nodesJ; edges = edgesJ; rootCauses = roots
+                           blindSpots = blindSpots; areas = areas |} ctx
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 

@@ -45,6 +45,16 @@ type Node = {
     blindSpot : bool
     /// What to actually do when this node fails, when it is not obvious.
     remedy   : string option
+    /// Entity reporting whether this node's OUTPUT is on. A power station or a
+    /// smart plug can be perfectly healthy while its output is switched off -
+    /// that is a state of the device, not a separate device.
+    outputEntity : string option
+    /// Which SSID / link this node is on, so the diagram can colour its radio
+    /// icon. None = not a wireless node.
+    link     : string option
+    /// Relative box size on the diagram: 1 = small, 2 = normal, 3 = large.
+    /// Grid-snapped in the UI.
+    size     : int
 }
 
 type Edge = {
@@ -58,174 +68,188 @@ module Topology =
 
     // Nodes that are not network-visible (circuits, the transfer switch) still
     // need to exist so power edges can point at them.
+
+    /// Terse constructor - most nodes only need a few fields, and 12-field
+    /// literals are unreadable.
+    let private node key label kind =
+        { key = key; label = label; kind = kind
+          device = None; entity = None; area = None
+          blindSpot = false; remedy = None
+          outputEntity = None; link = None; size = 2 }
+
     let nodes : Node list = [
         // ── Power sources ────────────────────────────────────────────────────
         // The GRID is a power source in its own right, not just what charges the
-        // batteries. Several devices are plugged straight into mains - AbeVue2,
-        // the EV charger, StudioESP32x and others - so they SURVIVE a battery
-        // failure and, conversely, die in a utility outage while battery-backed
-        // devices keep running. Modelling it is what lets the diagnosis tell
-        // "the grid went out" apart from "a power station failed".
-        // sensor.total_ac_input_power is the live draw-from-grid signal: it read
-        // 0 W on battery and jumped to 1508 W when mains returned on 2026-08-25.
-        yield { key = "grid"; label = "Utility grid (mains)"; kind = "grid"
-                device = None; entity = Some "sensor.total_ac_input_power"; area = None
-                blindSpot = false
-                remedy = Some "Utility outage: battery-backed circuits keep running; mains-only devices (AbeVue2, EV charger, StudioESP32x) are down until power returns" }
+        // batteries: AbeVue2, the EV charger and StudioESP32x are mains-only, so
+        // they SURVIVE a battery failure and die in a utility outage - the
+        // inverse of everything on the transfer-switch circuits.
+        // sensor.total_ac_input_power read 0 W on battery and jumped to 1508 W
+        // when mains returned on 2026-08-25.
+        yield { node "grid" "Utility grid (mains)" "grid" with
+                  entity = Some "sensor.total_ac_input_power"; size = 3
+                  remedy = Some "Utility outage: battery-backed circuits keep running; mains-only devices are down until power returns" }
 
-        yield { key = "ac500_1";      label = "BLUETTI AC500 #1";  kind = "battery"; device = Some "BLUETTI AC500 #1"; entity = Some "binary_sensor.ac500_connected";   area = Some "Garage"; blindSpot = false; remedy = None }
-        yield { key = "ac500_2";      label = "BLUETTI AC500 #2";  kind = "battery"; device = Some "BLUETTI AC500 #2"; entity = Some "binary_sensor.ac500_connected_2"; area = Some "Garage"; blindSpot = false; remedy = None }
-        yield { key = "ac200m";       label = "BLUETTI AC200M";    kind = "battery"; device = Some "BLUETTI AC200M";   entity = Some "binary_sensor.ac200m_connected";  area = Some "Garage"; blindSpot = false; remedy = None }
+        // Only AC500 #1 takes an AC input from the grid. AC500 #2 and the AC200M
+        // are NOT grid-connected.
+        // `outputEntity` is the unit's AC-OUTPUT state: a station can be healthy
+        // and pingable while its output is off - a STATE of the device, not a
+        // separate device.
+        yield { node "ac500_1" "BLUETTI AC500 #1" "battery" with
+                  device = Some "BLUETTI AC500 #1"; entity = Some "binary_sensor.ac500_connected"
+                  outputEntity = Some "sensor.ac500_ac_output_power"
+                  area = Some "Garage"; link = Some "ABEWNETG"; size = 3 }
+        yield { node "ac500_2" "BLUETTI AC500 #2" "battery" with
+                  device = Some "BLUETTI AC500 #2"; entity = Some "binary_sensor.ac500_connected_2"
+                  outputEntity = Some "sensor.ac500_ac_output_power_2"
+                  area = Some "Garage"; link = Some "ABEWNETG"; size = 3 }
+        yield { node "ac200m" "BLUETTI AC200M" "battery" with
+                  device = Some "BLUETTI AC200M"; entity = Some "binary_sensor.ac200m_connected"
+                  outputEntity = Some "sensor.ac200m_ac_output_power"
+                  area = Some "Garage"; size = 3 }
 
         // ── Manual transfer switch circuits ──────────────────────────────────
-        // A C E G H -> AC500 #1 ; B D F I -> AC500 #2
-        // Circuit D carries the routers, the modem and the game room, so losing it
-        // takes Home Assistant itself offline - the monitor cannot report its own
-        // death. The fix is manual and quick: flip the transfer switch for D from
-        // Battery to Line, which restores WiFi, LAN and internet.
+        // A C E G H default to AC500 #1, B D F I to AC500 #2 - but every circuit
+        // is MANUALLY SWITCHABLE between its Bluetti and the grid (Line). That is
+        // why a battery failure is recoverable without any electrical work, and
+        // why circuit D's remedy is simply "switch it to LINE".
         for c in [ "A"; "C"; "E"; "G"; "H"; "B"; "D"; "F"; "I" ] ->
-            { key       = $"circuit_{c.ToLowerInvariant()}"
-              label     = $"Circuit {c}"
-              kind      = "circuit"
-              device    = None
-              entity    = None
-              area      = Some "Garage"
-              blindSpot = (c = "D")
-              remedy    = if c = "D" then Some "Switch circuit D to LINE on the manual transfer switch - restores WiFi, LAN and internet" else None }
+            { node $"circuit_{c.ToLowerInvariant()}" $"Circuit {c}" "circuit" with
+                area      = Some "Garage"
+                size      = 1
+                blindSpot = (c = "D")
+                remedy    = if c = "D"
+                            then Some "Switch circuit D to LINE on the manual transfer switch - restores WiFi, LAN and internet"
+                            else Some "Switchable to LINE (grid) on the manual transfer switch" }
 
-        // ── Smart plugs ──────────────────────────────────────────────────────
-        yield { key = "kauf_xx";      label = "Kauf_XX (PLF12)";   kind = "plug"; device = Some "Kauf_XX (PLF12)"; entity = Some "switch.kauf_xx";                      area = None; blindSpot = false; remedy = None }
-        yield { key = "shelly_us";    label = "Shelly Plug US";    kind = "plug"; device = Some "Shelly Plug US";  entity = Some "switch.shellyplugus_048308deba94";    area = Some "Garage"; blindSpot = false; remedy = None }
+        // ── Smart plugs ─────────────────────────────────────────────────────
+        // Plugs gate their dependants: `outputEntity` is the switch state, so a
+        // plug that is online but switched OFF still means no power downstream.
+        yield { node "kauf_xx" "Kauf_XX (PLF12)" "plug" with
+                  device = Some "Kauf_XX (PLF12)"; entity = Some "switch.kauf_xx"
+                  outputEntity = Some "switch.kauf_xx"; link = Some "ABEWNETG"; size = 1 }
+        yield { node "shelly_us" "Shelly Plug US" "plug" with
+                  device = Some "Shelly Plug US"; entity = Some "switch.shellyplugus_048308deba94"
+                  outputEntity = Some "switch.shellyplugus_048308deba94"
+                  area = Some "Garage"; link = Some "ABEWNETG"; size = 1 }
 
-        // ── Compute ──────────────────────────────────────────────────────────
-        yield { key = "raspi4";       label = "AbeRaspi4";         kind = "pi"; device = Some "AbeRaspi4"; entity = None; area = None; blindSpot = false; remedy = None }
-        // The Pi Zero has no inventory name (Avahi name conflict); keyed by IP-bearing row.
-        yield { key = "raspi_zero";   label = "Pi Zero 2 W (thermal)"; kind = "pi"; device = None; entity = Some "sensor.thermal_master_p2_thermal_low"; area = Some "Garage"; blindSpot = false; remedy = None }
+        // ── Compute ─────────────────────────────────────────────────────────
+        yield { node "raspi4" "AbeRaspi4" "pi" with
+                  device = Some "AbeRaspi4"; link = Some "ABEWNETG" }
+        yield { node "raspi_zero" "Pi Zero 2 W (thermal)" "pi" with
+                  entity = Some "sensor.thermal_master_p2_thermal_low"
+                  area = Some "Garage"; link = Some "ABEWNETG-GAR" }
+        yield { node "mac_studio" "M1 Mac Studio" "computer" with
+                  device = Some "M1 Mac Studio"; area = Some "Studio"; link = Some "ABEWNETG" }
+        yield { node "homeassistant" "Home Assistant" "host" with
+                  device = Some "AbeHomeAssistant"; blindSpot = true; size = 3
+                  remedy = Some "If HA is unreachable, suspect circuit D - switch it to LINE" }
 
-        // ── Devices ──────────────────────────────────────────────────────────
-        yield { key = "kasa_garage";  label = "Kasa Garage camera"; kind = "camera"; device = Some "Kasa Garage";       entity = None; area = Some "Garage"; blindSpot = false; remedy = None }
-        yield { key = "cam_driveway"; label = "CloudEdge Driveway"; kind = "camera"; device = Some "CloudEdge Driveway"; entity = None; area = Some "Driveway"; blindSpot = false; remedy = None }
-        yield { key = "garage_opener";label = "Garage Opener";      kind = "opener"; device = Some "Garage Opener";      entity = Some "cover.garage_door"; area = Some "Garage"; blindSpot = false; remedy = None }
-        yield { key = "midea_ac";     label = "Midea window A/C";   kind = "appliance"; device = Some "Midea AC";        entity = None; area = Some "Garage"; blindSpot = false; remedy = None }
+        // ── Mains-only devices (no battery backup) ───────────────────────────
+        yield { node "abevue2" "AbeVue2 (energy monitor)" "sensor" with
+                  device = Some "AbeVue2"; entity = Some "sensor.abevue2_10_oven"; link = Some "ABEWNETG" }
+        yield { node "ev_charger" "Emporia EV Charger" "ev" with
+                  device = Some "Emporia EV Charger"; area = Some "Garage"; link = Some "ABEWNETG" }
+        yield { node "studio_esp32" "StudioESP32x (BT proxy)" "esp32" with
+                  device = Some "StudioESP32x"; entity = Some "sensor.studioesp32x_uptime_sensor"
+                  area = Some "Studio"; link = Some "ABEWNETG"
+                  remedy = Some "On mains, not battery - a utility outage takes it out even when the Bluettis are fine" }
 
-        // ── WiFi APs / SSIDs ─────────────────────────────────────────────────
-        // Netgear does not report per-client SSID, so these are manual nodes.
-        //
-        // ABWNETG_GAR is a separate **Qbit** router, not the NETGEAR. Its clients
-        // therefore show as "Wired" in the inventory: the NETGEAR only sees the
-        // Qbit's uplink, not the clients' own radios. (Same artifact as eero
-        // reporting connection_type=wired for 76 of 100 devices - that just means
-        // "not on my radios".) So do NOT infer this edge from scan data; a garage
-        // device reading "Wired" is the signature of being behind the Qbit.
-        yield { key = "ssid_abewnetg";     label = "ABEWNETG (NETGEAR RAX80)"; kind = "ap"; device = Some "NETGEAR RAX80"; entity = None; area = None; blindSpot = false; remedy = None }
-        yield { key = "qbit_gar";          label = "Qbit router (garage)";     kind = "ap"; device = None; entity = None; area = Some "Garage"; blindSpot = false; remedy = None }
-        yield { key = "ssid_abewnetg_gar"; label = "ABWNETG_GAR (on Qbit)";    kind = "ap"; device = None; entity = None; area = Some "Garage"; blindSpot = false; remedy = None }
-        yield { key = "eero";              label = "eero";                     kind = "ap"; device = Some "eero"; entity = None; area = None; blindSpot = false; remedy = None }
-        yield { key = "modem";             label = "Internet modem";           kind = "modem"; device = None; entity = None; area = Some "Game Room"; blindSpot = false; remedy = None }
-        yield { key = "game_room";         label = "Game Room (everything)";   kind = "zone"; device = None; entity = None; area = Some "Game Room"; blindSpot = false; remedy = None }
+        // ── Devices ─────────────────────────────────────────────────────────
+        yield { node "kasa_garage" "Kasa Garage camera" "camera" with
+                  device = Some "Kasa Garage"; area = Some "Garage"; link = Some "ABEWNETG" }
+        yield { node "cam_driveway" "CloudEdge Driveway" "camera" with
+                  device = Some "CloudEdge Driveway"; area = Some "Driveway"; link = Some "ABEWNETG-GAR" }
+        yield { node "garage_opener" "Garage Opener" "opener" with
+                  device = Some "Garage Opener"; entity = Some "cover.garage_door"
+                  area = Some "Garage"; link = Some "ABEWNETG" }
+        yield { node "midea_ac" "Midea window A/C" "appliance" with
+                  device = Some "Midea AC"; area = Some "Garage"; link = Some "ABEWNETG" }
 
-        // Home Assistant runs on the LAN that circuit D powers. If D goes, HA goes,
-        // and with it this monitor - hence blindSpot. Nothing will be reported.
-        yield { key = "homeassistant"; label = "Home Assistant"; kind = "host"
-                device = Some "AbeHomeAssistant"; entity = None; area = None
-                blindSpot = true
-                remedy = Some "If HA is unreachable, suspect circuit D - switch it to LINE" }
-
-        // The AC OUTPUT of AC500 #2 is a distinct failure point from the AC500
-        // itself: the unit can be perfectly healthy and reachable over WiFi while
-        // its AC output is off. That is what kills Kauf_XX -> Pi 4 -> all Bluetti
-        // BLE data, while the AC500s themselves still answer ping.
-        // Mains-only devices: no battery backup, so they track the grid exactly.
-        yield { key = "abevue2";     label = "AbeVue2 (energy monitor)"; kind = "sensor"
-                device = Some "AbeVue2"; entity = Some "sensor.abevue2_10_oven"; area = None
-                blindSpot = false; remedy = None }
-        yield { key = "ev_charger";  label = "Emporia EV Charger"; kind = "appliance"
-                device = Some "Emporia EV Charger"; entity = None; area = Some "Garage"
-                blindSpot = false; remedy = None }
-        yield { key = "studio_esp32"; label = "StudioESP32x (BT proxy)"; kind = "esp32"
-                device = Some "StudioESP32x"; entity = Some "sensor.studioesp32x_uptime_sensor"; area = Some "Studio"
-                blindSpot = false
-                remedy = Some "On mains, not battery - a utility outage takes it out even when the Bluettis are fine" }
-
-        yield { key = "ac500_2_acout"; label = "AC500 #2 AC output"; kind = "outlet"
-                device = None; entity = None; area = Some "Garage"
-                blindSpot = false
-                remedy = Some "AC500 #2 may be fine and pingable while its AC output is off - check the unit's AC OUT, not its connectivity" }
+        // ── Network ─────────────────────────────────────────────────────────
+        // Wiring: modem -wired- eero -wired- Nighthawk, and eero -wired- DBit
+        // (in the Game Room). Nighthawk is wired to the Mac and to Home Assistant.
+        // DBit serves ABEWNETG-GAR. Devices behind DBit read as "Wired" in the
+        // inventory because the NETGEAR only sees its uplink, not its radios.
+        yield { node "modem" "Internet modem" "modem" with
+                  area = Some "Game Room"; size = 3 }
+        yield { node "eero" "eero" "ap" with
+                  device = Some "eero"; link = Some "AbeEero"; size = 3 }
+        yield { node "nighthawk" "NETGEAR Nighthawk RAX80" "ap" with
+                  device = Some "NETGEAR RAX80"; link = Some "ABEWNETG"; size = 3 }
+        yield { node "dbit" "DBit router" "ap" with
+                  area = Some "Game Room"; link = Some "ABEWNETG-GAR"; size = 3 }
     ]
 
     let edges : Edge list = [
-        // ── Power: transfer-switch circuits ──────────────────────────────────
+        // ── Power: transfer-switch circuits ─────────────────────────────────
+        // Every circuit is manually switchable to the grid (Line), so these are
+        // the DEFAULT source, not a hard wiring.
         for c in [ "a"; "c"; "e"; "g"; "h" ] ->
-            { child = $"circuit_{c}"; parent = "ac500_1"; kind = Power; note = Some "manual transfer switch" }
+            { child = $"circuit_{c}"; parent = "ac500_1"; kind = Power; note = Some "manual transfer switch (switchable to Line)" }
         for c in [ "b"; "d"; "f"; "i" ] ->
-            { child = $"circuit_{c}"; parent = "ac500_2"; kind = Power; note = Some "manual transfer switch" }
+            { child = $"circuit_{c}"; parent = "ac500_2"; kind = Power; note = Some "manual transfer switch (switchable to Line)" }
 
-        // ── Power: mains-fed devices ─────────────────────────────────────────
-        // These have no battery backup: they die in a utility outage and survive
-        // a Bluetti failure, which is the opposite of everything on the circuits.
+        // ── Power: mains-only devices ───────────────────────────────────────
+        // No battery backup: they die in a utility outage and survive a Bluetti
+        // failure - the opposite of everything on the circuits.
         yield { child = "abevue2";      parent = "grid"; kind = Power; note = Some "mains only - no battery backup" }
         yield { child = "ev_charger";   parent = "grid"; kind = Power; note = Some "mains only - no battery backup" }
         yield { child = "studio_esp32"; parent = "grid"; kind = Power; note = Some "mains only - no battery backup" }
-        // The grid also charges the power stations (AC input), so a long utility
-        // outage eventually drains them - a slow, second-order failure.
+        // Only AC500 #1 takes an AC input from the grid.
         yield { child = "ac500_1"; parent = "grid"; kind = Power; note = Some "AC input charges the pack" }
-        yield { child = "ac500_2"; parent = "grid"; kind = Power; note = Some "AC input charges the pack" }
-        yield { child = "ac200m";  parent = "grid"; kind = Power; note = Some "AC input charges the pack" }
 
-        // ── Power: devices on plugs / battery outputs ────────────────────────
-        // The Pi 4 collects Bluetooth data for the Bluettis - if Kauf_XX has WiFi
-        // and is on, the Pi is receiving power, which distinguishes "Pi crashed"
-        // from "Pi lost power" (see RebootRaspi.fs, which power-cycles on that basis).
-        // Kauf_XX is fed from the AC OUTPUT of AC500 #2. This is the one exception
-        // to "circuit D explains everything": if AC500 #2's AC out is off then
-        // Kauf_XX is off, the Pi 4 is off, and NO Bluetti appears connected -
-        // yet the AC500s themselves are still on WiFi, answer ping, and remain
-        // reachable through the Bluetti app (given internet).
-        yield { child = "ac500_2_acout"; parent = "ac500_2"; kind = Power; note = Some "AC output of the unit" }
-        yield { child = "kauf_xx";       parent = "ac500_2_acout"; kind = Power; note = Some "fed from AC500 #2 AC out" }
-        yield { child = "raspi4";       parent = "kauf_xx";   kind = Power; note = Some "bluetti-mqtt host" }
-        yield { child = "raspi_zero";   parent = "shelly_us"; kind = Power; note = Some "shared with Kasa garage camera" }
-        yield { child = "kasa_garage";  parent = "shelly_us"; kind = Power; note = Some "shared with Pi Zero" }
-        yield { child = "garage_opener";parent = "ac500_2";   kind = Power; note = Some "on AC500 #2 output" }
-        yield { child = "midea_ac";     parent = "ac200m";    kind = Power; note = Some "cools the space the thermal camera measures" }
+        // ── Power: devices on plugs / battery outputs ───────────────────────
+        // Gated by AC500 #2's AC-output STATE: the unit can be healthy and
+        // pingable while its output is off, which kills Kauf_XX -> Pi 4 -> all
+        // Bluetti BLE data even though the AC500s still answer ping.
+        yield { child = "kauf_xx";       parent = "ac500_2";   kind = Power; note = Some "fed from AC500 #2 AC out (see its output state)" }
+        yield { child = "raspi4";        parent = "kauf_xx";   kind = Power; note = Some "bluetti-mqtt host" }
+        yield { child = "raspi_zero";    parent = "shelly_us"; kind = Power; note = Some "shared with Kasa garage camera" }
+        yield { child = "kasa_garage";   parent = "shelly_us"; kind = Power; note = Some "shared with Pi Zero" }
+        yield { child = "garage_opener"; parent = "ac500_2";   kind = Power; note = Some "on AC500 #2 output" }
+        yield { child = "midea_ac";      parent = "ac200m";    kind = Power; note = Some "cools the space the thermal camera measures" }
 
-        // ── Network ──────────────────────────────────────────────────────────
-        // The Qbit hangs off the NETGEAR, so a NETGEAR outage takes the garage
-        // SSID with it - two hops the diagram can show.
-        yield { child = "ssid_abewnetg_gar"; parent = "qbit_gar";      kind = Network; note = None }
-        yield { child = "qbit_gar";          parent = "ssid_abewnetg"; kind = Network; note = Some "Qbit uplink to NETGEAR" }
-        yield { child = "raspi_zero";        parent = "ssid_abewnetg_gar"; kind = Network; note = None }
-        yield { child = "cam_driveway";      parent = "ssid_abewnetg_gar"; kind = Network; note = None }
-        // ── Circuit D is the single point of failure for the whole network ───
-        // The WiFi routers AND the internet modem are plugged into circuit D, as
-        // is everything in the game room. Losing D therefore takes out all WiFi,
-        // all internet, and the game room at once - which would otherwise look
-        // like dozens of unrelated device failures. Circuit D feeds from AC500 #2.
-        yield { child = "ssid_abewnetg"; parent = "circuit_d"; kind = Power; note = Some "NETGEAR on circuit D" }
-        yield { child = "qbit_gar";      parent = "circuit_d"; kind = Power; note = Some "Qbit on circuit D" }
+        // ── Power: circuit D carries the whole network ──────────────────────
+        // Routers, the modem and the game room are all on D, so losing it takes
+        // WiFi, LAN, internet AND Home Assistant at once.
+        yield { child = "nighthawk";     parent = "circuit_d"; kind = Power; note = Some "Nighthawk on circuit D" }
         yield { child = "eero";          parent = "circuit_d"; kind = Power; note = Some "eero on circuit D" }
+        yield { child = "dbit";          parent = "circuit_d"; kind = Power; note = Some "DBit on circuit D" }
         yield { child = "modem";         parent = "circuit_d"; kind = Power; note = Some "internet modem on circuit D" }
-        yield { child = "game_room";     parent = "circuit_d"; kind = Power; note = Some "whole game room on circuit D" }
-        // The APs route through the modem for internet (not for LAN reachability).
-        yield { child = "ssid_abewnetg"; parent = "modem"; kind = Network; note = Some "WAN uplink" }
         yield { child = "homeassistant"; parent = "circuit_d"; kind = Power
                 note = Some "HA dies with circuit D - this monitor cannot report it" }
 
-        // Cloud cameras need INTERNET, not just LAN: losing the modem drops them
-        // even though WiFi still works. Distinct from a WiFi failure.
+        // ── Network: the wired backbone ─────────────────────────────────────
+        // modem --wired-- eero --wired-- Nighthawk
+        //                  \--wired-- DBit (Game Room)
+        // Nighthawk --wired-- Mac, Home Assistant
+        yield { child = "eero";          parent = "modem";     kind = Network; note = Some "wired" }
+        yield { child = "nighthawk";     parent = "eero";      kind = Network; note = Some "wired" }
+        yield { child = "dbit";          parent = "eero";      kind = Network; note = Some "wired" }
+        yield { child = "mac_studio";    parent = "nighthawk"; kind = Network; note = Some "wired (also has WiFi)" }
+        yield { child = "homeassistant"; parent = "nighthawk"; kind = Network; note = Some "wired" }
+
+        // ── Network: wireless clients ───────────────────────────────────────
+        yield { child = "raspi_zero";    parent = "dbit";      kind = Network; note = Some "ABEWNETG-GAR" }
+        yield { child = "cam_driveway";  parent = "dbit";      kind = Network; note = Some "ABEWNETG-GAR" }
+        yield { child = "kauf_xx";       parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
+        yield { child = "shelly_us";     parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
+        yield { child = "raspi4";        parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
+        yield { child = "garage_opener"; parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
+        yield { child = "kasa_garage";   parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
+        yield { child = "abevue2";       parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
+        yield { child = "ev_charger";    parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
+        yield { child = "studio_esp32";  parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
+        yield { child = "ac500_1";       parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
+        yield { child = "ac500_2";       parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
+
+        // Cloud cameras need INTERNET, not just LAN - losing the modem drops them
+        // even though WiFi still works. (Which cameras is brand-dependent; TODO.)
         yield { child = "cam_driveway"; parent = "modem"; kind = Network; note = Some "cloud camera needs internet" }
-        yield { child = "kasa_garage";  parent = "modem"; kind = Network; note = Some "cloud camera needs internet" }
 
-        // Most smart plugs and sensors are on the main SSID.
-        yield { child = "kauf_xx";      parent = "ssid_abewnetg"; kind = Network; note = None }
-        yield { child = "shelly_us";    parent = "ssid_abewnetg"; kind = Network; note = None }
-        yield { child = "raspi4";       parent = "ssid_abewnetg"; kind = Network; note = None }
-        yield { child = "garage_opener";parent = "ssid_abewnetg"; kind = Network; note = None }
-        yield { child = "kasa_garage";  parent = "ssid_abewnetg"; kind = Network; note = None }
-
-        // ── BLE ──────────────────────────────────────────────────────────────
-        // The Pi 4 is the Bluetti BLE gateway: when it cannot connect, the AC500
-        // data stops even though the power stations themselves are fine.
+        // ── BLE ─────────────────────────────────────────────────────────────
+        // The Pi 4 is the Bluetti BLE gateway: when it wedges, all three stop
+        // reporting while the power stations themselves are fine.
         yield { child = "ac500_1"; parent = "raspi4"; kind = BtHost; note = Some "bluetti-mqtt" }
         yield { child = "ac500_2"; parent = "raspi4"; kind = BtHost; note = Some "bluetti-mqtt" }
         yield { child = "ac200m";  parent = "raspi4"; kind = BtHost; note = Some "bluetti-mqtt" }

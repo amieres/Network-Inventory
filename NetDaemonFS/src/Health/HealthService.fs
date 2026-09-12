@@ -294,6 +294,18 @@ type HealthService
 
     member _.IsReady = lastLearn > DateTimeOffset.MinValue
 
+    /// Raw HA state strings for arbitrary entities, used for output/link
+    /// indicators that are not themselves health signals.
+    member _.GetRawStates() : Map<string, string> =
+        Topology.nodes
+        |> List.choose (fun n -> n.outputEntity)
+        |> List.distinct
+        |> List.choose (fun e ->
+            match ha.GetState e with
+            | null -> None
+            | st   -> Some (e, st.State))
+        |> Map.ofList
+
     interface IHostedService with
         member _.StartAsync(ct: CancellationToken) =
             task {
