@@ -453,6 +453,8 @@
     .h-banner.bad   { border-color: #7f1d1d; background: #1c1113; color: #fca5a5; }
     .h-banner b     { color: #e2e8f0; }
     .h-root         { margin-top: 0.45rem; font-size: 0.82rem; color: #cbd5e1; }
+    .h-remedy       { margin-top: 0.2rem; font-size: 0.78rem; color: #7dd3fc; }
+    #h-blind        { border-color: #3f3f46; background: #17161d; color: #a1a1aa; }
     .h-root code    { color: #fca5a5; }
 
     .h-stats { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.8rem 0; }
@@ -509,7 +511,7 @@
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v75 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v76 · js <span id="js-version">?</span></span></h1>
   <span class="view-tabs">
     <button class="view-tab active" data-view="inventory">Inventory</button>
     <button class="view-tab"        data-view="health">Health</button>
@@ -559,6 +561,7 @@
 
 <div id="health" hidden>
   <div id="h-banner" class="h-banner">Loading health…</div>
+  <div id="h-blind" class="h-banner" hidden></div>
   <div id="h-stats" class="h-stats"></div>
   <div id="diagram"></div>
   <table id="h-table">
@@ -633,6 +636,6 @@
 <div id="ctx-menu" hidden></div>
 
 <script src="app.js?v=89"></script>
-<script src="health.js?v=5"></script>
+<script src="health.js?v=6"></script>
 </body>
 </html>

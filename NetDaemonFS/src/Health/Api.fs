@@ -124,7 +124,9 @@ let private getTopology (svc: HealthService) : HttpHandler =
                    faulted  = v |> Option.map (fun x -> x.faulted) |> Option.defaultValue false
                    verdict  = verdict
                    because  = because
-                   affected = affected |})
+                   affected = affected
+                   blindSpot = n.blindSpot
+                   remedy    = n.remedy |})
 
         let edgesJ =
             Topology.edges
@@ -132,9 +134,21 @@ let private getTopology (svc: HealthService) : HttpHandler =
 
         let roots =
             Correlate.rootCauses verdicts
-            |> List.map (fun (v, affected) -> {| key = v.key; label = v.label; affected = affected |})
+            |> List.map (fun (v, affected) ->
+                let node = Topology.nodeByKey |> Map.tryFind v.key
+                {| key      = v.key
+                   label    = v.label
+                   affected = affected
+                   remedy   = node |> Option.bind (fun n -> n.remedy) |})
 
-        Response.ofJson {| nodes = nodesJ; edges = edgesJ; rootCauses = roots |} ctx
+        // Nodes whose failure would take HA down with it, so nothing would be
+        // reported. Surfaced so the dashboard can name its own blind spots.
+        let blindSpots =
+            Topology.nodes
+            |> List.filter (fun n -> n.blindSpot)
+            |> List.map (fun n -> {| key = n.key; label = n.label; remedy = n.remedy |})
+
+        Response.ofJson {| nodes = nodesJ; edges = edgesJ; rootCauses = roots; blindSpots = blindSpots |} ctx
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 

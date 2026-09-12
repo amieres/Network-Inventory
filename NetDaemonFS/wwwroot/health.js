@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 5;
+const HEALTH_JS_VERSION = 6;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -76,9 +76,26 @@ function renderHealth() {
               (r.affected.length
                  ? ' — explains ' + r.affected.length + ': ' + esc(r.affected.join(', '))
                  : '') +
+              (r.remedy ? '<div class="h-remedy">→ ' + esc(r.remedy) + '</div>' : '') +
               '</div>';
     });
     banner.innerHTML = html;
+  }
+
+  // ── Blind spots: failures that would take HA down, so nothing gets reported ──
+  const bs = (topoData && topoData.blindSpots) || [];
+  const bsEl = document.getElementById('h-blind');
+  if (bs.length) {
+    bsEl.hidden = false;
+    bsEl.innerHTML = '<b>Blind spots</b> — these would take Home Assistant down too, ' +
+      'so this dashboard would simply stop rather than warn you:' +
+      bs.map(function (n) {
+        return '<div class="h-root">' + esc(n.label) +
+               (n.remedy ? '<div class="h-remedy">→ ' + esc(n.remedy) + '</div>' : '') +
+               '</div>';
+      }).join('');
+  } else {
+    bsEl.hidden = true;
   }
 
   // ── Stat chips (click to filter) ──
