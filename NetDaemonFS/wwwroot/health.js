@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 9;
+const HEALTH_JS_VERSION = 11;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -18,7 +18,41 @@ let showHelpers  = false;  // helpers are monitored but are not things you can f
 let diagramZoom = 1;
 let diagramPan  = { x: 0, y: 0 };
 let nodePos     = JSON.parse(localStorage.getItem('healthNodePos') || '{}');
-function saveNodePos() { localStorage.setItem('healthNodePos', JSON.stringify(nodePos)); }
+
+// Hand-arranged positions are real work and easy to destroy with one careless
+// clear, so every save also keeps a rolling backup and a timestamped snapshot.
+// `healthRestore()` from the console brings the last layout back.
+function saveNodePos() {
+  const prev = localStorage.getItem('healthNodePos');
+  if (prev && prev !== '{}') localStorage.setItem('healthNodePosPrev', prev);
+  localStorage.setItem('healthNodePos', JSON.stringify(nodePos));
+  localStorage.setItem('healthNodePosAt', new Date().toISOString());
+}
+
+function healthRestore() {
+  const prev = localStorage.getItem('healthNodePosPrev');
+  if (!prev) { console.warn('no previous layout saved'); return false; }
+  nodePos = JSON.parse(prev);
+  localStorage.setItem('healthNodePos', prev);
+  renderDiagram();
+  return Object.keys(nodePos).length + ' node positions restored';
+}
+
+/// Copy the current layout to the clipboard / console so it can be kept
+/// outside the browser.
+function healthExportLayout() {
+  const json = JSON.stringify(nodePos);
+  console.log(json);
+  if (navigator.clipboard) navigator.clipboard.writeText(json);
+  return Object.keys(nodePos).length + ' positions exported (also copied to clipboard)';
+}
+
+function healthImportLayout(json) {
+  nodePos = typeof json === 'string' ? JSON.parse(json) : json;
+  saveNodePos();
+  renderDiagram();
+  return Object.keys(nodePos).length + ' positions imported';
+}
 
 const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function esc(s) {
@@ -386,7 +420,11 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H) {
       if (a === 'in')            diagramZoom = Math.min(4, diagramZoom * 1.25);
       else if (a === 'out')      diagramZoom = Math.max(0.25, diagramZoom / 1.25);
       else if (a === 'reset')    { diagramZoom = 1; diagramPan = { x: 0, y: 0 }; }
-      else if (a === 'relayout') { nodePos = {}; saveNodePos(); diagramZoom = 1; diagramPan = { x: 0, y: 0 }; }
+      else if (a === 'relayout') {
+        if (Object.keys(nodePos).length &&
+            !confirm('Discard your arranged positions and auto-layout again? healthRestore() in the console can undo this.')) return;
+        nodePos = {}; saveNodePos(); diagramZoom = 1; diagramPan = { x: 0, y: 0 };
+      }
       renderDiagram();
     });
   });
