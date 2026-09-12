@@ -41,6 +41,23 @@ type HealthService
     let monitors = Dictionary<string, Monitor>()
     let mutable lastLearn = DateTimeOffset.MinValue
     let mutable lastSummary = ""
+    let mutable registries = Registry.empty
+
+    /// entity id -> (deviceId, deviceName, area), for the device-level rollup.
+    let deviceOf (entityId: string) =
+        registries.entities
+        |> Map.tryFind entityId
+        |> Option.bind (fun e -> e.deviceId)
+        |> Option.bind (fun did -> registries.devices |> Map.tryFind did)
+        |> Option.map  (fun d -> d.deviceId, d.name, d.area)
+
+    /// Entities belonging to an integration that no longer runs (e.g. the 42
+    /// `emporia_vue` entities orphaned when the Vue 2 was reflashed to ESPHome).
+    let isOrphan (entityId: string) =
+        registries.entities
+        |> Map.tryFind entityId
+        |> Option.map  (fun e -> Rules.isOrphanPlatform e.platform)
+        |> Option.defaultValue false
 
     let isExcluded (id: string) =
         cfg.Exclude |> Array.exists (fun s -> not (String.IsNullOrWhiteSpace s) && id.Contains s)
@@ -50,12 +67,19 @@ type HealthService
         let http = httpF.CreateClient()
         http.Timeout <- TimeSpan.FromSeconds 120.0
 
-        // Candidates: entities with a usable current state, minus excluded domains.
+        // Registry first - it supplies the entity->device map and the platform
+        // used to spot orphans. Refreshed each learn so new devices are picked up.
+        let! regs = Registry.fetch log conn.BaseUrl conn.Token
+        if regs.entities.Count > 0 then registries <- regs
+
+        // Candidates: entities with a usable current state, minus excluded domains
+        // and minus orphans of dead integrations.
         let candidates =
             ha.GetAllEntities()
             |> Seq.map   (fun e -> e.EntityId)
             |> Seq.filter Rules.isCandidate
             |> Seq.filter (isExcluded >> not)
+            |> Seq.filter (isOrphan   >> not)
             |> Seq.toList
 
         log.LogInformation("Health: learning cadence for {N} candidate entities", List.length candidates)
@@ -174,13 +198,20 @@ type HealthService
         | Unavailable _ -> $"{f.entityId}: unavailable"
         | _ -> f.entityId
 
+    // Notifications are off by default: the dashboard is the primary surface, and a
+    // flurry of persistent notifications for things you cannot act on immediately
+    // just trains you to dismiss them. Kept behind a flag for genuinely urgent use.
     let notify (faults: Fault list) =
         if cfg.Notify && not (List.isEmpty faults) then
-            let lines = faults |> List.map describe
-            let title = if faults.Length = 1 then "Health: 1 device stopped reporting"
-                        else $"Health: {faults.Length} devices stopped reporting"
+            // Report per DEVICE, not per entity - one dead RainMachine is 39 entities.
+            let deviceNames =
+                faults
+                |> List.map (fun f -> deviceOf f.entityId |> Option.map (fun (_, n, _) -> n) |> Option.defaultValue f.entityId)
+                |> List.distinct
+            let title = if deviceNames.Length = 1 then "Health: 1 device stopped reporting"
+                        else $"Health: {deviceNames.Length} devices stopped reporting"
             ha.CallService("notify", "persistent_notification",
-                data = {| title = title; message = String.Join("\n", lines) |})
+                data = {| title = title; message = String.Join("\n", deviceNames) |})
 
     // ── Publish a summary sensor so health is visible in HA/history ───────────
     // IHaContext cannot create entities, so this goes through MQTT discovery the
@@ -242,6 +273,27 @@ type HealthService
             publish stateTopic (string (List.length faulted))
             publish attrsTopic (Text.Json.JsonSerializer.Serialize attrs)
 
+    // ── Public API (consumed by the web dashboard) ───────────────────────────
+
+    /// One row per device, faults first. This is what the dashboard renders.
+    member _.GetDeviceHealth() : Devices.DeviceHealth list =
+        Devices.rollup deviceOf (monitors.Values |> Seq.toList)
+
+    /// Per-entity detail, for drill-down from a device row.
+    member _.GetEntityHealth() =
+        monitors.Values
+        |> Seq.map (fun m ->
+            {| entityId  = m.entityId
+               state     = m.lastState.label
+               watch     = m.watch.label
+               cadence   = m.cadence.label
+               threshold = (match m.watch with Staleness t -> Nullable t.TotalSeconds | _ -> Nullable())
+               since     = m.lastChanged |})
+        |> Seq.sortBy (fun r -> r.entityId)
+        |> Seq.toList
+
+    member _.IsReady = lastLearn > DateTimeOffset.MinValue
+
     interface IHostedService with
         member _.StartAsync(ct: CancellationToken) =
             task {
@@ -281,5 +333,11 @@ let addHealthServices
         .Configure<HealthConfig>(services, cfg.GetSection "HealthMonitor") |> ignore
     Microsoft.Extensions.DependencyInjection.OptionsConfigurationServiceCollectionExtensions
         .Configure<HaConnection>(services, cfg.GetSection "HomeAssistant") |> ignore
+    // Singleton + hosted service (same pattern as ScanService) so the web API can
+    // inject it to serve the dashboard.
+    Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions
+        .AddSingleton<HealthService>(services) |> ignore
     Microsoft.Extensions.DependencyInjection.ServiceCollectionHostedServiceExtensions
-        .AddHostedService<HealthService>(services) |> ignore
+        .AddHostedService<HealthService>(services, fun sp ->
+            Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<HealthService>(sp)) |> ignore

@@ -29,6 +29,8 @@
     <Compile Include="src/Health/Domain.fs" />
     <Compile Include="src/Health/Config.fs" />
     <Compile Include="src/Health/Rules.fs" />
+    <Compile Include="src/Health/Devices.fs" />
+    <Compile Include="src/Health/Registry.fs" />
     <Compile Include="src/Health/HistoryClient.fs" />
     <Compile Include="src/Health/HealthService.fs" />
     <Compile Include="src/RebootRaspi.fs" />

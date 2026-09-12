@@ -5,7 +5,7 @@ open Health
 
 // ── Entity filter ────────────────────────────────────────────────────────────
 // Domains that never carry a reporting cadence, plus browser_mod (dead browser
-// sessions: 90+ permanently-unavailable entities that would otherwise dominate).
+// sessions: 131 permanently-unavailable entities that would otherwise dominate).
 let private excludedDomains =
     set [ "automation"; "script"; "scene"; "person"; "zone"; "sun"; "tts"
           "conversation"; "todo"; "update"; "button"; "input_boolean"
@@ -14,6 +14,21 @@ let private excludedDomains =
 let isCandidate (entityId: string) =
     let domain = entityId.Split('.').[0]
     not (excludedDomains.Contains domain) && not (entityId.Contains "browser_mod")
+
+// ── Orphan detection ─────────────────────────────────────────────────────────
+// An entity left behind by an integration that no longer runs is debris, not a
+// fault. Real example: the Emporia Vue 2 was reflashed from stock firmware to
+// ESPHome, so its 42 `emporia_vue` entities are permanently unavailable while
+// the device itself is perfectly healthy and reporting through `abevue2_*`.
+// Of 244 unavailable entities here, 173 are orphans (131 browser_mod + 42
+// emporia_vue) - flagging them as faults would bury every real problem.
+//
+// Heuristic: every entity belonging to an integration is unavailable AND none
+// has ever reported in the learn window. A live integration virtually always has
+// at least one entity doing something.
+let orphanPlatforms = set [ "browser_mod"; "emporia_vue" ]
+
+let isOrphanPlatform (platform: string) = orphanPlatforms.Contains platform
 
 // ── Cadence classification ───────────────────────────────────────────────────
 // Thresholds calibrated against a 120-entity sample (2026-09-11 → 09-12):
