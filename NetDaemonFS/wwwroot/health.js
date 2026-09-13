@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 30;
+const HEALTH_JS_VERSION = 31;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -273,6 +273,12 @@ function saveLayers() { localStorage.setItem('healthLayers', JSON.stringify(laye
 
 // User-added connections, kept client-side so the graph can be extended without
 // a redeploy. Merged with the server's edges at render time.
+// Per-EDGE routing override: 'h' or 'v', keyed "parent>child". The automatic
+// choice follows the geometry; a hand-arranged layout sometimes wants a
+// specific side.
+let edgeDir = JSON.parse(localStorage.getItem('healthEdgeDir') || '{}');
+function saveEdgeDir() { localStorage.setItem('healthEdgeDir', JSON.stringify(edgeDir)); }
+
 let userEdges = JSON.parse(localStorage.getItem('healthUserEdges') || '[]');
 function saveUserEdges() { localStorage.setItem('healthUserEdges', JSON.stringify(userEdges)); }
 
@@ -473,18 +479,41 @@ function renderDiagram() {
     const a = pos.get(e.parent), b = pos.get(e.child);
     const na = byKey.get(e.parent), nb = byKey.get(e.child);
     if (!a || !b || !na || !nb) return '';
-    const x1 = a.x + boxW(na), y1 = a.y + boxH(na) / 2;
-    const x2 = b.x,            y2 = b.y + boxH(nb) / 2;
-    const mx = (x1 + x2) / 2;
+    // Anchor on whichever SIDES actually face each other. The old code always
+    // left the parent's right edge and entered the child's left, so a child
+    // below its parent got a line that swung out sideways and doubled back.
+    const aw = boxW(na), ah = boxH(na), bw = boxW(nb), bh = boxH(nb);
+    const acx = a.x + aw / 2, acy = a.y + ah / 2;
+    const bcx = b.x + bw / 2, bcy = b.y + bh / 2;
+    const dx = bcx - acx, dy = bcy - acy;
+    const forced = edgeDir[e.parent + '>' + e.child];
+    const vertical = forced ? (forced === 'v') : Math.abs(dy) > Math.abs(dx);
+    let x1, y1, x2, y2, c1x, c1y, c2x, c2y;
+    if (vertical) {
+      const down = dy >= 0;
+      x1 = acx; y1 = down ? a.y + ah : a.y;
+      x2 = bcx; y2 = down ? b.y      : b.y + bh;
+      const my = (y1 + y2) / 2;
+      c1x = x1; c1y = my; c2x = x2; c2y = my;
+    } else {
+      const right = dx >= 0;
+      x1 = right ? a.x + aw : a.x;      y1 = acy;
+      x2 = right ? b.x      : b.x + bw; y2 = bcy;
+      const mx = (x1 + x2) / 2;
+      c1x = mx; c1y = y1; c2x = mx; c2y = y2;
+    }
     // Wireless links take the child's SSID colour; wired/powerline stay dashed grey.
     const wireless = e.kind === 'network' && nb.link;
     const stroke = wireless ? ' style="stroke:' + (LINK_COLOR[nb.link] || '#94a3b8') + '"' : '';
     const cls = 'e-' + e.kind + (e.user ? ' e-user' : '') + (wireless ? ' e-wireless' : '');
     return '<path class="' + cls + '" data-child="' + e.child + '" data-parent="' + e.parent +
-           '" data-i="' + i + '"' + stroke + ' d="M' + x1 + ',' + y1 +
-           ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2 + '">' +
+           '" data-i="' + i + '" data-dir="' + (vertical ? 'v' : 'h') + '"' + stroke +
+           ' d="M' + x1 + ',' + y1 +
+           ' C' + c1x + ',' + c1y + ' ' + c2x + ',' + c2y + ' ' + x2 + ',' + y2 + '">' +
            '<title>' + esc(e.kind) + (e.note ? ': ' + esc(e.note) : '') +
-           (e.user ? ' (added by you - click to remove)' : '') + '</title></path>';
+           ' — ' + (vertical ? 'vertical' : 'horizontal') + (forced ? ' (fixed)' : ' (auto)') +
+           '; shift-click to flip, alt-click for auto' +
+           (e.user ? '; click to remove' : '') + '</title></path>';
   }
 
   function nodeGroup(n) {
@@ -553,7 +582,7 @@ function renderDiagram() {
       '<button id="btn-connect" class="' + (connectFrom ? 'on' : '') + '" ' +
         'title="Click this, then click two nodes to connect them">+ connection</button>' +
       '<span class="diag-hint">' +
-        (connectFrom ? 'click the PARENT (source) node…' : 'drag nodes · double-click to edit · Ctrl+scroll to zoom · ◍ = blind spot') +
+        (connectFrom ? 'click the PARENT (source) node…' : 'drag nodes · double-click to edit · shift-click a line to flip it · Ctrl+scroll to zoom') +
       '</span>' +
     '</div>' +
     '<svg id="diag-svg" viewBox="' + vb + '" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">' +
@@ -860,20 +889,52 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H, originX, originY) {
       const pip = g.querySelector('.pip-off');
       if (pip) { pip.setAttribute('cx', p.x + w - 8); pip.setAttribute('cy', p.y + h - 7); }
     });
+    // Same anchoring rules as the initial render, so a dragged node's lines do
+    // not jump to a different side until the next full redraw.
     document.querySelectorAll('#diag-edges path').forEach(function (path) {
       const na = byKey.get(path.dataset.parent), nb = byKey.get(path.dataset.child);
       const a = pos.get(path.dataset.parent),    b = pos.get(path.dataset.child);
       if (!a || !b || !na || !nb) return;
-      const x1 = a.x + boxW(na), y1 = a.y + boxH(na) / 2;
-      const x2 = b.x,            y2 = b.y + boxH(nb) / 2;
-      const mx = (x1 + x2) / 2;
-      path.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 +
-                             ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2);
+      const aw = boxW(na), ah = boxH(na), bw = boxW(nb), bh = boxH(nb);
+      const acx = a.x + aw / 2, acy = a.y + ah / 2;
+      const bcx = b.x + bw / 2, bcy = b.y + bh / 2;
+      const dx = bcx - acx, dy = bcy - acy;
+      const forced = edgeDir[path.dataset.parent + '>' + path.dataset.child];
+      const vertical = forced ? (forced === 'v') : Math.abs(dy) > Math.abs(dx);
+      let x1, y1, x2, y2, c1x, c1y, c2x, c2y;
+      if (vertical) {
+        const down = dy >= 0;
+        x1 = acx; y1 = down ? a.y + ah : a.y;
+        x2 = bcx; y2 = down ? b.y      : b.y + bh;
+        const my = (y1 + y2) / 2;
+        c1x = x1; c1y = my; c2x = x2; c2y = my;
+      } else {
+        const right = dx >= 0;
+        x1 = right ? a.x + aw : a.x; y1 = acy;
+        x2 = right ? b.x      : b.x + bw; y2 = bcy;
+        const mx = (x1 + x2) / 2;
+        c1x = mx; c1y = y1; c2x = mx; c2y = y2;
+      }
+      path.setAttribute('data-dir', vertical ? 'v' : 'h');
+      path.setAttribute('d', 'M' + x1 + ',' + y1 +
+                             ' C' + c1x + ',' + c1y + ' ' + c2x + ',' + c2y +
+                             ' ' + x2 + ',' + y2);
     });
   }
 
-  // Click a user-added edge to remove it.
   svg.addEventListener('click', function (evt) {
+    // Shift-click flips an edge's routing; alt-click returns it to automatic.
+    const path = evt.target.closest ? evt.target.closest('#diag-edges path') : null;
+    if (path && (evt.shiftKey || evt.altKey)) {
+      const k = path.dataset.parent + '>' + path.dataset.child;
+      if (evt.altKey) delete edgeDir[k];
+      else edgeDir[k] = path.dataset.dir === 'v' ? 'h' : 'v';
+      saveEdgeDir();
+      renderDiagram();
+      evt.preventDefault();
+      return;
+    }
+    // Click a user-added edge to remove it.
     const p = evt.target.closest ? evt.target.closest('.e-user') : null;
     if (!p) return;
     const i = parseInt(p.dataset.i, 10) - topoData.edges.length;
