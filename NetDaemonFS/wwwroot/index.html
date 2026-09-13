@@ -484,6 +484,16 @@
     .diag-toolbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
     .diag-toolbar button { flex: 0 0 auto; white-space: nowrap; }
     .diag-hint { flex: 0 0 auto; white-space: nowrap; }
+    #diag-resize {
+      height: 9px; cursor: ns-resize; border-radius: 0 0 6px 6px;
+      background: linear-gradient(#1a1d2e, #12141d);
+      border: 1px solid #2d3048; border-top: none; margin-bottom: 0.2rem;
+    }
+    #diag-resize:hover { background: #252840; }
+    #diag-resize::after {
+      content: ''; display: block; width: 34px; height: 2px; margin: 3px auto;
+      background: #3a3f5c; border-radius: 2px;
+    }
     #h-blind { font-size: 0.78rem; padding: 0.4rem 0.7rem; margin: 0.35rem 0; }
     #h-blind .h-root { margin-top: 0.25rem; }
     .h-stats { margin: 0.3rem 0; gap: 0.3rem; flex-wrap: nowrap;
@@ -541,7 +551,9 @@
 
     /* ── Diagram ────────────────────────────────────────────── */
     #diagram { margin: 1rem 0 0; }
-    #diagram svg { width: 100%; height: 52vh; min-height: 260px; display: block; background: #0d0f16; border: 1px solid #2d3048; border-radius: 8px; resize: vertical; overflow: auto; }
+    #diagram svg { width: 100%; height: 68vh; min-height: 300px; display: block;
+                   background: #0d0f16; border: 1px solid #2d3048; border-radius: 8px;
+                   resize: vertical; overflow: hidden; }
     .n-box   { stroke-width: 1.5; }
     .n-ok    { fill: #132a1c; stroke: #22c55e; }
     .n-fault { fill: #2a1315; stroke: #ef4444; }
@@ -614,8 +626,7 @@
     .lyr-sep { width: 1px; height: 16px; background: #2d3048; margin: 0 0.2rem; }
     .diag-toolbar button.lyr { opacity: 0.45; }
     .diag-toolbar button.lyr.on, .diag-toolbar button.on { opacity: 1; border-color: #4f46e5; color: #c7d2fe; }
-    .diag-legend { margin-top: 0.25rem; white-space: nowrap; overflow-x: auto;
-                   flex: 0 0 auto; scrollbar-width: thin; font-size: 0.72rem; color: #64748b; line-height: 1.6; }
+    .diag-legend { margin-top: 0.4rem; white-space: normal; flex: 0 0 auto; font-size: 0.72rem; color: #64748b; line-height: 1.6; }
     .diag-legend b { color: #fbbf24; }
     .lg-dead { color: #3f4250; }
     .lg-pip  { color: #f87171; }
@@ -641,7 +652,7 @@
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v93 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v98 · js <span id="js-version">?</span></span></h1>
   <span class="view-tabs">
     <button class="view-tab active" data-view="inventory">Inventory</button>
     <button class="view-tab"        data-view="health">Health</button>
@@ -694,6 +705,7 @@
   <div id="h-banner" class="h-banner" hidden>Loading health…</div>
   <div id="h-stats" class="h-stats"></div>
   <div id="diagram"></div>
+  <div id="diag-resize" title="Drag to resize the diagram"></div>
   <div id="h-blind" class="h-banner" hidden></div>
   <div class="diag-legend">
     <b>◍</b> blind spot — its failure also takes Home Assistant down, so nothing would be reported ·
@@ -795,6 +807,6 @@
 <div id="ctx-menu" hidden></div>
 
 <script src="app.js?v=89"></script>
-<script src="health.js?v=23"></script>
+<script src="health.js?v=28"></script>
 </body>
 </html>

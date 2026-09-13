@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 23;
+const HEALTH_JS_VERSION = 28;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -111,10 +111,16 @@ async function loadHealth() {
     ]);
     healthData = results[0];
     topoData   = results[1];
-    // Server-stored positions win on first load, so a layout follows the user
-    // between browsers instead of living only in localStorage.
-    if (topoData.positions && topoData.positions.length && !Object.keys(nodePos).length) {
-      topoData.positions.forEach(function (p) { nodePos[p.key] = { x: p.x, y: p.y }; });
+    // Merge server positions PER NODE rather than all-or-nothing. The old
+    // guard only adopted them when localStorage was completely empty, so nodes
+    // added later (e.g. a new set of breakers) never picked up their stored
+    // positions and fell back to auto-layout.
+    if (topoData.positions && topoData.positions.length) {
+      topoData.positions.forEach(function (p) {
+        if (!nodePos[p.key] && isFinite(p.x) && isFinite(p.y)) {
+          nodePos[p.key] = { x: p.x, y: p.y };
+        }
+      });
     }
     renderHealth();
   } catch (e) {
@@ -319,7 +325,8 @@ function ifaceGlyph(kind, c) {
            '<circle cx="4" cy="8.4" r=".8" fill="' + c + '" stroke="none"/>';
   }
   if (kind === 'bluetooth') {
-    return '<path d="M3 2.5l4 3.5-4 3.5V1l4 3.5-4 3.5"/>';
+    // The Bluetooth rune: vertical stem with two triangles meeting at centre.
+    return '<path d="M4 1.5v9l3.2-2.6L2.5 4.2M4 10.5V1.5l3.2 2.6L2.5 7.8"/>';
   }
   // wired: a socket with a cable running out of it
   return '<rect x="0" y="2" width="5" height="5" rx="1"/>' +
@@ -426,10 +433,16 @@ function renderDiagram() {
   });
 
   const byKey = new Map(nodes.map(function (n) { return [n.key, n]; }));
-  const xs = nodes.map(function (n) { return pos.get(n.key).x + boxW(n); });
-  const ys = nodes.map(function (n) { return pos.get(n.key).y + boxH(n); });
-  const W = Math.max.apply(null, xs) + PAD * 2;
-  const H = Math.max.apply(null, ys) + PAD * 2 + 30;
+  // Track the real extent, including NEGATIVE coordinates - nodes dragged left
+  // of or above the origin used to be clipped out of the viewBox entirely.
+  const xs0 = nodes.map(function (n) { return pos.get(n.key).x; });
+  const ys0 = nodes.map(function (n) { return pos.get(n.key).y; });
+  const xs1 = nodes.map(function (n) { return pos.get(n.key).x + boxW(n); });
+  const ys1 = nodes.map(function (n) { return pos.get(n.key).y + boxH(n); });
+  const minX = Math.min.apply(null, xs0) - PAD;
+  const minY = Math.min.apply(null, ys0) - PAD;
+  const W = Math.max.apply(null, xs1) + PAD - minX;
+  const H = Math.max.apply(null, ys1) + PAD + 30 - minY;
 
   // ── Area rectangles: bounding box of each area's nodes ──
   const areaSvg = areas.map(function (a) {
@@ -513,7 +526,7 @@ function renderDiagram() {
       outPip + blind + noteMark + '</g>';
   }
 
-  const vb = [diagramPan.x, diagramPan.y, W / diagramZoom, H / diagramZoom].join(' ');
+  const vb = [minX + diagramPan.x, minY + diagramPan.y, W / diagramZoom, H / diagramZoom].join(' ');
   const layerBtn = function (k, label) {
     return '<button class="lyr' + (layerOn[k] ? ' on' : '') + '" data-layer="' + k + '">' + label + '</button>';
   };
@@ -534,13 +547,19 @@ function renderDiagram() {
         (connectFrom ? 'click the PARENT (source) node…' : 'drag nodes · double-click to edit · Ctrl+scroll to zoom · ◍ = blind spot') +
       '</span>' +
     '</div>' +
-    '<svg id="diag-svg" viewBox="' + vb + '" preserveAspectRatio="xMinYMin meet" xmlns="http://www.w3.org/2000/svg">' +
+    '<svg id="diag-svg" viewBox="' + vb + '" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">' +
       '<g id="diag-areas">' + areaSvg + '</g>' +
       '<g id="diag-edges">' + edges.map(edgePath).join('') + '</g>' +
       '<g id="diag-nodes">' + nodes.map(nodeGroup).join('') + '</g>' +
     '</svg>';
 
-  wireDiagram(pos, byKey, boxW, boxH, W, H);
+  const savedH = localStorage.getItem('healthDiagHeight');
+  if (savedH) {
+    const svgEl = document.getElementById('diag-svg');
+    if (svgEl) svgEl.style.height = parseInt(savedH, 10) + 'px';
+  }
+
+  wireDiagram(pos, byKey, boxW, boxH, W, H, minX, minY);
 }
 
 
@@ -691,7 +710,7 @@ async function saveNodeEditor() {
 }
 
 // ── Diagram interaction: drag (grid-snapped), zoom, pan, layers, connect ─────
-function wireDiagram(pos, byKey, boxW, boxH, W, H) {
+function wireDiagram(pos, byKey, boxW, boxH, W, H, originX, originY) {
   const svg = document.getElementById('diag-svg');
   if (!svg) return;
 
@@ -700,7 +719,12 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H) {
       const a = b.dataset.zoom;
       if (a === 'in')            diagramZoom = Math.min(4, diagramZoom * 1.25);
       else if (a === 'out')      diagramZoom = Math.max(0.25, diagramZoom / 1.25);
-      else if (a === 'reset')    { diagramZoom = 1; diagramPan = { x: 0, y: 0 }; }
+      else if (a === 'reset')    {
+        // Frame everything: zoom 1 IS the full content box (W x H already spans
+        // min..max, negatives included), and preserveAspectRatio letterboxes it.
+        diagramZoom = 1;
+        diagramPan  = { x: 0, y: 0 };
+      }
       else if (a === 'relayout') {
         if (Object.keys(nodePos).length &&
             !confirm('Discard your arranged positions and auto-layout again? healthRestore() in the console can undo this.')) return;
@@ -734,14 +758,15 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H) {
     const r = svg.getBoundingClientRect();
     const vbw = W / diagramZoom, vbh = H / diagramZoom;
     return {
-      x: diagramPan.x + (evt.clientX - r.left) / r.width  * vbw,
-      y: diagramPan.y + (evt.clientY - r.top)  / r.height * vbh
+      x: originX + diagramPan.x + (evt.clientX - r.left) / r.width  * vbw,
+      y: originY + diagramPan.y + (evt.clientY - r.top)  / r.height * vbh
     };
   }
 
   function applyViewBox() {
     svg.setAttribute('viewBox',
-      [diagramPan.x, diagramPan.y, W / diagramZoom, H / diagramZoom].join(' '));
+      [originX + diagramPan.x, originY + diagramPan.y,
+       W / diagramZoom, H / diagramZoom].join(' '));
   }
 
   function redrawPositions() {
@@ -875,6 +900,42 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H) {
     applyViewBox();
   }, { passive: false });
 }
+
+// ── Diagram resize handle ────────────────────────────────────────────────────
+// Space BEFORE the diagram steals canvas height, so the canvas is directly
+// resizable and the chosen height is remembered.
+(function () {
+  const saved = localStorage.getItem('healthDiagHeight');
+  function applyHeight(px) {
+    const svg = document.getElementById('diag-svg');
+    if (svg) svg.style.height = px + 'px';
+  }
+  if (saved) setTimeout(function () { applyHeight(parseInt(saved, 10)); }, 400);
+
+  const handle = document.getElementById('diag-resize');
+  if (!handle) return;
+  let startY = 0, startH = 0, dragging = false;
+
+  handle.addEventListener('mousedown', function (e) {
+    const svg = document.getElementById('diag-svg');
+    if (!svg) return;
+    dragging = true;
+    startY = e.clientY;
+    startH = svg.getBoundingClientRect().height;
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', function (e) {
+    if (!dragging) return;
+    const h = Math.max(200, startH + (e.clientY - startY));
+    applyHeight(h);
+  });
+  window.addEventListener('mouseup', function () {
+    if (!dragging) return;
+    dragging = false;
+    const svg = document.getElementById('diag-svg');
+    if (svg) localStorage.setItem('healthDiagHeight', Math.round(svg.getBoundingClientRect().height));
+  });
+})();
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
