@@ -139,7 +139,7 @@ module Topology =
                   entity = Some "sensor.thermal_master_p2_thermal_low"
                   area = Some "Garage"; link = Some "ABEWNETG-GAR" }
         yield { node "mac_studio" "M1 Mac Studio" "computer" with
-                  device = Some "M1 Mac Studio"; area = Some "Studio"; link = Some "ABEWNETG" }
+                  device = Some "M1 Mac Studio"; area = Some "Game Room"; link = Some "ABEWNETG" }
         yield { node "homeassistant" "Home Assistant" "host" with
                   device = Some "AbeHomeAssistant"; blindSpot = true; size = 3
                   remedy = Some "If HA is unreachable, suspect circuit D - switch it to LINE" }
@@ -170,6 +170,12 @@ module Topology =
         // (in the Game Room). Nighthawk is wired to the Mac and to Home Assistant.
         // DBit serves ABEWNETG-GAR. Devices behind DBit read as "Wired" in the
         // inventory because the NETGEAR only sees its uplink, not its radios.
+        // The INTERNET connection itself, distinct from the modem hardware: the
+        // modem can be powered and healthy while the WAN link is down, which is
+        // what cloud cameras and remote access actually depend on.
+        yield { node "internet" "Internet (WAN)" "internet" with
+                  entity = Some "binary_sensor.internet_up"; size = 3
+                  remedy = Some "WAN down: LAN and WiFi keep working; cloud cameras, remote access and app-dependent devices do not" }
         yield { node "modem" "Internet modem" "modem" with
                   area = Some "Game Room"; size = 3 }
         yield { node "eero" "eero" "ap" with
@@ -223,6 +229,7 @@ module Topology =
         // modem --wired-- eero --wired-- Nighthawk
         //                  \--wired-- DBit (Game Room)
         // Nighthawk --wired-- Mac, Home Assistant
+        yield { child = "internet";      parent = "modem";     kind = Network; note = Some "WAN service" }
         yield { child = "eero";          parent = "modem";     kind = Network; note = Some "wired" }
         yield { child = "nighthawk";     parent = "eero";      kind = Network; note = Some "wired" }
         yield { child = "dbit";          parent = "eero";      kind = Network; note = Some "wired" }
@@ -245,7 +252,7 @@ module Topology =
 
         // Cloud cameras need INTERNET, not just LAN - losing the modem drops them
         // even though WiFi still works. (Which cameras is brand-dependent; TODO.)
-        yield { child = "cam_driveway"; parent = "modem"; kind = Network; note = Some "cloud camera needs internet" }
+        yield { child = "cam_driveway"; parent = "internet"; kind = Network; note = Some "cloud camera needs internet" }
 
         // ── BLE ─────────────────────────────────────────────────────────────
         // The Pi 4 is the Bluetti BLE gateway: when it wedges, all three stop

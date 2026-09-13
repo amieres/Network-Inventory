@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 11;
+const HEALTH_JS_VERSION = 12;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -27,6 +27,14 @@ function saveNodePos() {
   if (prev && prev !== '{}') localStorage.setItem('healthNodePosPrev', prev);
   localStorage.setItem('healthNodePos', JSON.stringify(nodePos));
   localStorage.setItem('healthNodePosAt', new Date().toISOString());
+  // Also persist server-side so a layout is not trapped in one browser.
+  clearTimeout(saveNodePos._t);
+  saveNodePos._t = setTimeout(function () {
+    const ps = Object.keys(nodePos).map(function (k) {
+      return { key: k, x: nodePos[k].x, y: nodePos[k].y };
+    });
+    if (ps.length) api('POST', '/api/health/positions', ps).catch(function () {});
+  }, 800);
 }
 
 function healthRestore() {
@@ -87,6 +95,11 @@ async function loadHealth() {
     ]);
     healthData = results[0];
     topoData   = results[1];
+    // Server-stored positions win on first load, so a layout follows the user
+    // between browsers instead of living only in localStorage.
+    if (topoData.positions && topoData.positions.length && !Object.keys(nodePos).length) {
+      topoData.positions.forEach(function (p) { nodePos[p.key] = { x: p.x, y: p.y }; });
+    }
     renderHealth();
   } catch (e) {
     const b = document.getElementById('h-banner');
@@ -325,6 +338,12 @@ function renderDiagram() {
 
   function edgePath(e, i) {
     if (!layerOn[e.kind]) return '';
+    // Wireless association is conveyed by the node's coloured radio icon, not by
+    // a line - otherwise every device fans into one of three APs and the diagram
+    // becomes unreadable. Only genuinely wired links get a network line.
+    const childNode = byKey.get(e.child);
+    if (e.kind === 'network' && childNode && childNode.link &&
+        (e.note || '').indexOf('wired') < 0) return '';
     const a = pos.get(e.parent), b = pos.get(e.child);
     const na = byKey.get(e.parent), nb = byKey.get(e.child);
     if (!a || !b || !na || !nb) return '';
@@ -397,7 +416,7 @@ function renderDiagram() {
       '<button id="btn-connect" class="' + (connectFrom ? 'on' : '') + '" ' +
         'title="Click this, then click two nodes to connect them">+ connection</button>' +
       '<span class="diag-hint">' +
-        (connectFrom ? 'click the PARENT (source) node…' : 'drag nodes · scroll to zoom · ◍ = blind spot') +
+        (connectFrom ? 'click the PARENT (source) node…' : 'drag nodes · double-click to edit · scroll to zoom · ◍ = blind spot') +
       '</span>' +
     '</div>' +
     '<svg id="diag-svg" viewBox="' + vb + '" preserveAspectRatio="xMinYMin meet" xmlns="http://www.w3.org/2000/svg">' +
@@ -407,6 +426,79 @@ function renderDiagram() {
     '</svg>';
 
   wireDiagram(pos, byKey, boxW, boxH, W, H);
+}
+
+
+// ── Node settings editor ─────────────────────────────────────────────────────
+// Edits are stored server-side (SQLite, alongside the inventory) so a name,
+// SSID, area or size survives a redeploy instead of being overwritten by the
+// next build of Topology.fs.
+
+let editingKey = null;
+
+function openNodeEditor(key) {
+  const n = (topoData.nodes || []).find(function (x) { return x.key === key; });
+  if (!n) return;
+  editingKey = key;
+
+  const links = (topoData.links || []).slice();
+  ['AbeEero', 'ABEWNETG', 'ABEWNETG-5G', 'ABEWNETG-GAR'].forEach(function (l) {
+    if (links.indexOf(l) < 0) links.push(l);
+  });
+  const areas = (topoData.knownAreas || []).slice();
+  const kinds = (topoData.kinds || []).slice();
+
+  const opts = function (list, cur, blankLabel) {
+    return '<option value="">' + blankLabel + '</option>' +
+      list.map(function (v) {
+        return '<option value="' + esc(v) + '"' + (v === cur ? ' selected' : '') + '>' + esc(v) + '</option>';
+      }).join('');
+  };
+
+  document.getElementById('node-editor-body').innerHTML =
+    '<label>Name<input id="ed-label" value="' + esc(n.label) + '"></label>' +
+    '<label>Area<select id="ed-area">' + opts(areas, n.area, '(none)') + '</select>' +
+      '<input id="ed-area-new" placeholder="or type a new area"></label>' +
+    '<label>WiFi SSID / link<select id="ed-link">' + opts(links, n.link, '(wired / none)') + '</select></label>' +
+    '<label>Type<select id="ed-kind">' + opts(kinds, n.kind, '(unchanged)') + '</select></label>' +
+    '<label>Box size<select id="ed-size">' +
+      '<option value="1"' + (n.size === 1 ? ' selected' : '') + '>small</option>' +
+      '<option value="2"' + (n.size === 2 ? ' selected' : '') + '>normal</option>' +
+      '<option value="3"' + (n.size === 3 ? ' selected' : '') + '>large</option>' +
+      '</select></label>' +
+    '<label class="ed-check"><input type="checkbox" id="ed-ac"' + (n.acInput ? ' checked' : '') + '>' +
+      ' Takes AC input from the grid</label>' +
+    '<div class="ed-meta">key: <code>' + esc(n.key) + '</code>' +
+      (n.device ? ' · device: ' + esc(n.device) : '') + '</div>';
+
+  document.getElementById('node-editor-title').textContent = 'Edit ' + n.label;
+  document.getElementById('node-editor').hidden = false;
+}
+
+function closeNodeEditor() {
+  document.getElementById('node-editor').hidden = true;
+  editingKey = null;
+}
+
+async function saveNodeEditor() {
+  if (!editingKey) return;
+  const newArea = document.getElementById('ed-area-new').value.trim();
+  const body = {
+    nodeKey: editingKey,
+    label:   document.getElementById('ed-label').value.trim(),
+    area:    newArea || document.getElementById('ed-area').value,
+    link:    document.getElementById('ed-link').value,
+    kind:    document.getElementById('ed-kind').value || null,
+    size:    parseInt(document.getElementById('ed-size').value, 10),
+    acInput: document.getElementById('ed-ac').checked
+  };
+  try {
+    await api('POST', '/api/health/node', body);
+    closeNodeEditor();
+    await loadHealth();
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  }
 }
 
 // ── Diagram interaction: drag (grid-snapped), zoom, pan, layers, connect ─────
@@ -510,6 +602,12 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H) {
     }
   });
 
+  // Double-click opens the settings editor for that node.
+  svg.addEventListener('dblclick', function (evt) {
+    const g = evt.target.closest ? evt.target.closest('.n-g') : null;
+    if (g) { openNodeEditor(g.dataset.key); evt.preventDefault(); }
+  });
+
   let drag = null;
 
   svg.addEventListener('mousedown', function (evt) {
@@ -523,8 +621,10 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H) {
       } else if (connectFrom !== key) {
         const kind = prompt('Connection type: power, network or bt-host', 'power');
         if (kind && ['power', 'network', 'bt-host', 'host'].indexOf(kind) >= 0) {
-          userEdges.push({ child: key, parent: connectFrom, kind: kind, note: 'added by you', user: true });
-          saveUserEdges();
+          api('POST', '/api/health/edge',
+              { child: key, parent: connectFrom, kind: kind, note: 'added by you' })
+            .then(function () { loadHealth(); })
+            .catch(function (e) { alert('Could not add connection: ' + e.message); });
         }
         connectFrom = null;
       }
@@ -582,6 +682,15 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H) {
 document.querySelectorAll('.view-tab').forEach(function (b) {
   b.addEventListener('click', function () { switchView(b.dataset.view); });
 });
+
+['ed-close', 'ed-cancel'].forEach(function (id) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('click', closeNodeEditor);
+});
+const edSave = document.getElementById('ed-save');
+if (edSave) edSave.addEventListener('click', saveNodeEditor);
+const edBg = document.querySelector('#node-editor .ed-bg');
+if (edBg) edBg.addEventListener('click', closeNodeEditor);
 
 setInterval(function () {
   if (!document.getElementById('health').hidden) loadHealth();

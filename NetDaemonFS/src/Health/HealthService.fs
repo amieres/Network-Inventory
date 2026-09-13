@@ -33,6 +33,7 @@ type HealthService
     , httpF    : IHttpClientFactory
     , entityManager : IMqttEntityManager
     , mqttConfig    : IOptions<MqttConfiguration>
+    , invOpts  : IOptions<Inventory.InventoryConfig>
     ) =
 
     let cfg  = opts.Value
@@ -42,6 +43,15 @@ type HealthService
     let mutable lastLearn = DateTimeOffset.MinValue
     let mutable lastSummary = ""
     let mutable registries = Registry.empty
+
+    // Topology edits live in the same SQLite file as the inventory, so a name,
+    // SSID, area or size changed in the dashboard survives a redeploy instead of
+    // being overwritten by the next build.
+    let dbPath = invOpts.Value.DbPath
+    let openDb () =
+        let c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={dbPath};Foreign Keys=True")
+        c.Open()
+        c
 
     /// entity id -> (deviceId, deviceName, area), for the device-level rollup.
     let deviceOf (entityId: string) =
@@ -294,6 +304,45 @@ type HealthService
 
     member _.IsReady = lastLearn > DateTimeOffset.MinValue
 
+    /// Seed topology with stored user edits layered on top.
+    member _.GetNodes() : Node list =
+        try
+            use c = openDb ()
+            let ov = Store.loadOverrides c
+            Topology.nodes |> List.map (Store.applyOverrides ov)
+        with ex ->
+            log.LogWarning(ex, "Health: could not load topology overrides")
+            Topology.nodes
+
+    member _.GetEdges() : Edge list =
+        try
+            use c = openDb ()
+            Topology.edges @ Store.loadUserEdges c
+        with _ -> Topology.edges
+
+    member _.GetPositions() =
+        try use c = openDb () in Store.loadPositions c
+        with _ -> Map.empty
+
+    member _.SaveOverride(o: Store.Override) =
+        use c = openDb ()
+        Store.migrate c
+        Store.saveOverride c o
+
+    member _.AddEdge(child, parent, kind, note) =
+        use c = openDb ()
+        Store.migrate c
+        Store.addUserEdge c child parent kind note
+
+    member _.RemoveEdge(child, parent, kind) =
+        use c = openDb ()
+        Store.removeUserEdge c child parent kind
+
+    member _.SavePositions(ps) =
+        use c = openDb ()
+        Store.migrate c
+        Store.savePositions c ps
+
     /// Raw HA state strings for arbitrary entities, used for output/link
     /// indicators that are not themselves health signals.
     member _.GetRawStates() : Map<string, string> =
@@ -312,6 +361,12 @@ type HealthService
                 if not cfg.Enabled then
                     log.LogInformation("Health: disabled by configuration")
                 else
+                // Topology-override tables live alongside the inventory DB.
+                try
+                    use c = openDb ()
+                    Store.migrate c
+                with ex -> log.LogWarning(ex, "Health: could not migrate override tables")
+
                 let loop = async {
                     // Let NetDaemon finish connecting and the entity list populate.
                     do! Async.Sleep 30_000

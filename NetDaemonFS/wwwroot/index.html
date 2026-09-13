@@ -517,6 +517,43 @@
     .area-box   { fill: rgba(124,140,248,0.045); stroke: #2d3048; stroke-dasharray: 4 4; }
     .area-label { font: 600 9px 'Segoe UI', sans-serif; fill: #5b6478; text-transform: uppercase; letter-spacing: 0.06em; }
     .n-g.connect-src .n-box { stroke: #7c8cf8; stroke-width: 3; }
+    /* ── Node settings editor ─────────────────────────────── */
+    #node-editor { position: fixed; inset: 0; z-index: 200; }
+    #node-editor[hidden] { display: none; }
+    .ed-bg  { position: absolute; inset: 0; background: rgba(0,0,0,0.6); }
+    .ed-box {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      background: #1a1d2e; border: 1px solid #2d3048; border-radius: 8px;
+      min-width: 360px; max-width: 460px;
+    }
+    .ed-head { padding: 0.7rem 1rem; border-bottom: 1px solid #2d3048;
+               display: flex; justify-content: space-between; align-items: center;
+               font-size: 0.9rem; font-weight: 600; }
+    .ed-head button { background: none; border: none; color: #94a3b8; font-size: 1.2rem; cursor: pointer; }
+    .ed-body { padding: 0.8rem 1rem; display: flex; flex-direction: column; gap: 0.6rem; }
+    .ed-body label { display: flex; flex-direction: column; gap: 0.2rem;
+                     font-size: 0.72rem; color: #64748b; text-transform: uppercase;
+                     letter-spacing: 0.04em; }
+    .ed-body input[type=text], .ed-body input:not([type]), .ed-body select {
+      background: #0f1117; border: 1px solid #2d3048; border-radius: 4px;
+      color: #e2e8f0; padding: 0.35rem 0.5rem; font-size: 0.85rem; font-family: inherit;
+      text-transform: none; letter-spacing: normal;
+    }
+    .ed-body select + input { margin-top: 0.3rem; }
+    .ed-check { flex-direction: row !important; align-items: center; gap: 0.4rem !important;
+                text-transform: none !important; font-size: 0.82rem !important; color: #cbd5e1 !important; }
+    .ed-check input { accent-color: #4f46e5; }
+    .ed-meta { font-size: 0.72rem; color: #475569; }
+    .ed-meta code { color: #7c8cf8; }
+    .ed-foot { padding: 0.6rem 1rem; border-top: 1px solid #2d3048;
+               display: flex; justify-content: flex-end; gap: 0.4rem; }
+    .ed-foot button { padding: 0.35rem 0.9rem; border-radius: 4px; cursor: pointer;
+                      font-size: 0.8rem; font-family: inherit;
+                      background: transparent; border: 1px solid #2d3048; color: #94a3b8; }
+    .ed-foot button.primary { background: #4f46e5; border-color: #4f46e5; color: #fff; }
+    .ed-foot button:hover { background: #252840; color: #e2e8f0; }
+    .ed-foot button.primary:hover { background: #4338ca; color: #fff; }
+
     .lyr-sep { width: 1px; height: 16px; background: #2d3048; margin: 0 0.2rem; }
     .diag-toolbar button.lyr { opacity: 0.45; }
     .diag-toolbar button.lyr.on, .diag-toolbar button.on { opacity: 1; border-color: #4f46e5; color: #c7d2fe; }
@@ -546,7 +583,7 @@
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v81 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v82 · js <span id="js-version">?</span></span></h1>
   <span class="view-tabs">
     <button class="view-tab active" data-view="inventory">Inventory</button>
     <button class="view-tab"        data-view="health">Health</button>
@@ -610,6 +647,19 @@
     <span style="color:#fbbf24">ABEWNETG-GAR</span> ·
     dashed grey = wired/powerline &middot; layout autosaves; <code>healthRestore()</code> undoes a reset, <code>healthExportLayout()</code> saves a copy
   </div>
+  <div id="node-editor" hidden>
+    <div class="ed-bg"></div>
+    <div class="ed-box">
+      <div class="ed-head"><span id="node-editor-title">Edit device</span>
+        <button id="ed-close">&times;</button></div>
+      <div id="node-editor-body" class="ed-body"></div>
+      <div class="ed-foot">
+        <button id="ed-cancel">Cancel</button>
+        <button id="ed-save" class="primary">Save</button>
+      </div>
+    </div>
+  </div>
+
   <table id="h-table">
     <thead>
       <tr>
@@ -682,6 +732,6 @@
 <div id="ctx-menu" hidden></div>
 
 <script src="app.js?v=89"></script>
-<script src="health.js?v=11"></script>
+<script src="health.js?v=12"></script>
 </body>
 </html>

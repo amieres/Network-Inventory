@@ -112,6 +112,9 @@ let private getTopology (svc: HealthService) : HttpHandler =
                 | None, Some f   -> f
                 | None, None     -> false
 
+        let liveNodes = svc.GetNodes()
+        let liveEdges = svc.GetEdges()
+        let liveByKey = liveNodes |> List.map (fun n -> n.key, n) |> Map.ofList
         let verdicts = Correlate.analyse isFaulted
 
         // Raw entity states, for output/link indicators.
@@ -142,7 +145,7 @@ let private getTopology (svc: HealthService) : HttpHandler =
             |> List.exists (fun e -> isFaulted e.parent)
 
         let nodesJ =
-            Topology.nodes
+            liveNodes
             |> List.map (fun n ->
                 let v = verdicts |> List.tryFind (fun x -> x.key = n.key)
                 let verdict, because, affected =
@@ -181,7 +184,7 @@ let private getTopology (svc: HealthService) : HttpHandler =
                    radioUp   = not (radioDown n.key) |})
 
         let edgesJ =
-            Topology.edges
+            liveEdges
             |> List.map (fun e -> {| child = e.child; parent = e.parent; kind = e.kind.label; note = e.note |})
 
         let roots =
@@ -196,24 +199,99 @@ let private getTopology (svc: HealthService) : HttpHandler =
         // Nodes whose failure would take HA down with it, so nothing would be
         // reported. Surfaced so the dashboard can name its own blind spots.
         let blindSpots =
-            Topology.nodes
+            liveNodes
             |> List.filter (fun n -> n.blindSpot)
             |> List.map (fun n -> {| key = n.key; label = n.label; remedy = n.remedy |})
 
         // Areas, so the diagram can draw grouping rectangles.
         let areas =
-            Topology.nodes
+            liveNodes
             |> List.choose (fun n -> n.area |> Option.map (fun a -> a, n.key))
             |> List.groupBy fst
             |> List.map (fun (a, xs) -> {| name = a; keys = xs |> List.map snd |})
 
+        let positions =
+            svc.GetPositions()
+            |> Map.toList
+            |> List.map (fun (k, (x, y)) -> {| key = k; x = x; y = y |})
+
         Response.ofJson {| nodes = nodesJ; edges = edgesJ; rootCauses = roots
-                           blindSpots = blindSpots; areas = areas |} ctx
+                           blindSpots = blindSpots; areas = areas
+                           positions = positions
+                           // Distinct SSIDs seen in the topology, so the editor can
+                           // offer them instead of requiring free text.
+                           links = liveNodes |> List.choose (fun n -> n.link) |> List.distinct |> List.sort
+                           kinds = liveNodes |> List.map (fun n -> n.kind) |> List.distinct |> List.sort
+                           knownAreas = liveNodes |> List.choose (fun n -> n.area) |> List.distinct |> List.sort |} ctx
+
+// ── Editing ──────────────────────────────────────────────────────────────────
+// Topology edits are stored, not hardcoded, so a name/SSID/area/size change in
+// the dashboard survives the next deploy.
+
+[<CLIMutable>]
+type OverrideDto = {
+    nodeKey : string
+    label   : string
+    area    : string
+    link    : string
+    size    : Nullable<int>
+    acInput : Nullable<bool>
+    kind    : string
+}
+
+let private saveNode (svc: HealthService) : HttpHandler =
+    fun ctx -> task {
+        let! dto = Request.getJson<OverrideDto> ctx
+        if String.IsNullOrWhiteSpace dto.nodeKey then
+            return! (Response.withStatusCode 400 >> Response.ofJson {| error = "nodeKey required" |}) ctx
+        else
+            let opt (v: string) = if isNull v then None else Some v
+            svc.SaveOverride
+                { nodeKey = dto.nodeKey
+                  label   = opt dto.label
+                  area    = opt dto.area
+                  link    = opt dto.link
+                  size    = Option.ofNullable dto.size
+                  acInput = Option.ofNullable dto.acInput
+                  kind    = opt dto.kind }
+            return! Response.ofJson {| ok = true |} ctx
+    }
+
+[<CLIMutable>]
+type EdgeDto = { child : string; parent : string; kind : string; note : string }
+
+let private addEdge (svc: HealthService) : HttpHandler =
+    fun ctx -> task {
+        let! dto = Request.getJson<EdgeDto> ctx
+        svc.AddEdge(dto.child, dto.parent, dto.kind, (if isNull dto.note then None else Some dto.note))
+        return! Response.ofJson {| ok = true |} ctx
+    }
+
+let private deleteEdge (svc: HealthService) : HttpHandler =
+    fun ctx -> task {
+        let! dto = Request.getJson<EdgeDto> ctx
+        svc.RemoveEdge(dto.child, dto.parent, dto.kind)
+        return! Response.ofJson {| ok = true |} ctx
+    }
+
+[<CLIMutable>]
+type PosDto = { key : string; x : float; y : float }
+
+let private savePositions (svc: HealthService) : HttpHandler =
+    fun ctx -> task {
+        let! ps = Request.getJson<PosDto[]> ctx
+        svc.SavePositions(ps |> Array.toList |> List.map (fun p -> p.key, p.x, p.y))
+        return! Response.ofJson {| ok = true; saved = ps.Length |} ctx
+    }
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 let routes (svc: HealthService) : HttpEndpoint list = [
     get "/api/health/devices"  (getDevices  svc)
     get "/api/health/entities" (getEntities svc)
-    get "/api/health/topology" (getTopology svc)
+    get  "/api/health/topology"  (getTopology   svc)
+    post "/api/health/node"      (saveNode      svc)
+    post "/api/health/edge"      (addEdge       svc)
+    post "/api/health/edge/del"  (deleteEdge    svc)
+    post "/api/health/positions" (savePositions svc)
 ]
