@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 34;
+const HEALTH_JS_VERSION = 36;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -264,7 +264,11 @@ function renderHealth() {
 // and persisted, and connections can be added by hand.
 
 const GRID = 10;                       // snap step for dragging
-const snap = function (v) { return Math.round(v / GRID) * GRID; };
+// Guard here too: a single Infinity reaching nodePos corrupts the saved layout.
+const snap = function (v) {
+  if (!isFinite(v)) return null;
+  return Math.round(v / GRID) * GRID;
+};
 
 // Which edge kinds are visible. Electrical / wifi / bluetooth toggled separately
 // because a power problem and a radio problem look nothing alike.
@@ -881,11 +885,21 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H, originX, originY) {
 
   function toSvg(evt) {
     const r = svg.getBoundingClientRect();
+    // A zero-width/height rect (mid re-render, a resize, or a briefly detached
+    // element) made these divisions produce Infinity, which flowed into nodePos
+    // and snapped every dragged node to the corner. Refuse to compute rather
+    // than return poison.
+    // A tiny-but-nonzero rect is just as bad as a zero one: dividing by 1px
+    // produced x = 473890 in testing. Require a plausible canvas.
+    if (r.width < 50 || r.height < 50) return null;
     const vbw = W / diagramZoom, vbh = H / diagramZoom;
-    return {
-      x: originX + diagramPan.x + (evt.clientX - r.left) / r.width  * vbw,
-      y: originY + diagramPan.y + (evt.clientY - r.top)  / r.height * vbh
-    };
+    const x = originX + diagramPan.x + (evt.clientX - r.left) / r.width  * vbw;
+    const y = originY + diagramPan.y + (evt.clientY - r.top)  / r.height * vbh;
+    if (!isFinite(x) || !isFinite(y)) return null;
+    // Nothing legitimate lands this far out; treat it as a bad measurement.
+    const LIMIT = 100000;
+    if (Math.abs(x) > LIMIT || Math.abs(y) > LIMIT) return null;
+    return { x: x, y: y };
   }
 
   function applyViewBox() {
@@ -992,6 +1006,7 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H, originX, originY) {
     if (areaG && !onNode && !connectFrom) {
       const keys = (areaG.dataset.keys || '').split(',').filter(Boolean);
       const p0 = toSvg(evt);
+      if (!p0) return;
       const start = {};
       keys.forEach(function (k) {
         const q = pos.get(k);
@@ -1026,9 +1041,11 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H, originX, originY) {
     }
 
     const p = toSvg(evt);
+    if (!p) return;
     if (g) {
       const key = g.dataset.key;
       const cur = pos.get(key);
+      if (!cur) return;
       drag = { kind: 'node', key: key, dx: p.x - cur.x, dy: p.y - cur.y };
       g.classList.add('dragging');
     } else {
@@ -1040,14 +1057,17 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H, originX, originY) {
   window.addEventListener('mousemove', function (evt) {
     if (!drag) return;
     const p = toSvg(evt);
+    if (!p) return;      // never move a node to a non-finite position
     if (drag.kind === 'area') {
       // Move every member of the area by the same delta, so the room keeps its
       // internal arrangement.
       const adx = p.x - drag.x0, ady = p.y - drag.y0;
+      if (!isFinite(adx) || !isFinite(ady)) return;
       drag.keys.forEach(function (k) {
         const st = drag.start[k];
         if (!st) return;
-        nodePos[k] = { x: snap(st.x + adx), y: snap(st.y + ady) };
+        const nx = snap(st.x + adx), ny = snap(st.y + ady);
+        if (nx !== null && ny !== null) nodePos[k] = { x: nx, y: ny };
       });
       redrawPositions();
       return;
@@ -1055,7 +1075,7 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H, originX, originY) {
     if (drag.kind === 'node') {
       // Snap to a grid so hand-arranged layouts stay tidy.
       const nx = snap(p.x - drag.dx), ny = snap(p.y - drag.dy);
-      if (isFinite(nx) && isFinite(ny)) {
+      if (nx !== null && ny !== null && isFinite(nx) && isFinite(ny)) {
         nodePos[drag.key] = { x: nx, y: ny };
         redrawPositions();
       }
@@ -1086,9 +1106,11 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H, originX, originY) {
     if (!evt.ctrlKey && !evt.metaKey) return;
     evt.preventDefault();
     const before = toSvg(evt);
+    if (!before) return;
     diagramZoom = evt.deltaY < 0 ? Math.min(4, diagramZoom * 1.1)
                                  : Math.max(0.25, diagramZoom / 1.1);
     const after = toSvg(evt);
+    if (!after) return;
     diagramPan.x += before.x - after.x;      // keep the cursor anchored
     diagramPan.y += before.y - after.y;
     applyViewBox();
