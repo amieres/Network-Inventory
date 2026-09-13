@@ -72,7 +72,34 @@ type Node = {
     /// The upstream service that feeds this node, for the WAN handoff: the
     /// internet arrives AT the ONT, so the ONT depends on it.
     wanFrom  : string option
+    /// A MANUAL TRIPLE SWITCH (the transfer-switch circuits) has two feeds and a
+    /// physical position. Only the selected feed is live, so the diagram must
+    /// follow the position rather than drawing both as active.
+    altFrom  : PowerSource
+    /// Position of a switchable device:
+    ///   breaker       -> On | Off
+    ///   triple switch -> Generator | Off | Line
+    position : SwitchPos
 }
+
+/// Physical position of a switchable device. `Generator` selects `powerFrom`,
+/// `Line` selects `altFrom`, and `Off` means nothing downstream is powered.
+and SwitchPos =
+    | PosOn
+    | PosOff
+    | PosGenerator
+    | PosLine
+    | PosUnset
+    with
+        member this.label =
+            match this with
+            | PosOn -> "on" | PosOff -> "off"
+            | PosGenerator -> "generator" | PosLine -> "line" | PosUnset -> ""
+        /// Does this position pass power through at all?
+        member this.isLive =
+            match this with
+            | PosOff -> false
+            | _      -> true
 
 /// Power can come from a specific device (grid, plug, power station, circuit,
 /// anything) or simply from the area the node sits in - a wall socket on that
@@ -124,7 +151,8 @@ module Topology =
           blindSpot = false; remedy = None
           outputEntity = None; link = None; size = 2
           powerFrom = PowerUnknown; lan = NoLan
-          btHost = None; needsInternet = false; wanFrom = None }
+          btHost = None; needsInternet = false; wanFrom = None
+          altFrom = PowerUnknown; position = PosUnset }
 
     let nodes : Node list = [
         // ── Power sources ────────────────────────────────────────────────────
@@ -178,7 +206,11 @@ module Topology =
                             else Some "Switchable to LINE (grid) on the manual transfer switch"
                 // Default feed: A C E G H from AC500 #1, B D F I from AC500 #2.
                 // Every circuit is manually switchable to LINE (the grid).
-                powerFrom = FromDevice (if "ACEGH".Contains c then "ac500_1" else "ac500_2") }
+                // Two feeds: Generator (the Bluetti) and Line (the grid). The
+                // position selects which one is actually live.
+                powerFrom = FromDevice (if "ACEGH".Contains c then "ac500_1" else "ac500_2")
+                altFrom   = FromDevice "grid"
+                position  = PosGenerator }
 
         // ── Smart plugs ─────────────────────────────────────────────────────
         // Plugs gate their dependants: `outputEntity` is the switch state, so a
@@ -299,7 +331,15 @@ module Topology =
     /// icon rather than a line fanning into an AP.
     let derivedEdges (ns: Node list) : Edge list = [
         for n in ns do
-            match n.powerFrom with
+            // A triple switch passes power from exactly ONE of its two feeds,
+            // chosen by its physical position; Off passes nothing.
+            let activeSource =
+                match n.position with
+                | PosOff       -> PowerUnknown
+                | PosLine      -> n.altFrom
+                | PosGenerator -> n.powerFrom
+                | _            -> n.powerFrom
+            match activeSource with
             | FromDevice k -> yield { child = n.key; parent = k; kind = Power; note = None }
             | FromArea a   -> ()    // enclosed by the area rectangle; no line
             | PowerUnknown -> ()

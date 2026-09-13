@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS health_node_pos (
     cmd.ExecuteNonQuery() |> ignore
 
     // Columns added after the first release.
-    for col, decl in [ "power_from", "TEXT"; "lan", "TEXT" ] do
+    for col, decl in [ "power_from", "TEXT"; "lan", "TEXT"; "alt_from", "TEXT"; "position", "TEXT" ] do
         use chk = conn.CreateCommand()
         chk.CommandText <- $"SELECT COUNT(*) FROM pragma_table_info('health_node_overrides') WHERE name = '{col}'"
         if (chk.ExecuteScalar() :?> int64) = 0L then
@@ -94,6 +94,15 @@ let parsePower (s: string) : PowerSource option =
     | s when s.StartsWith "device:" -> Some (FromDevice (s.Substring 7))
     | s when s.StartsWith "area:"   -> Some (FromArea   (s.Substring 5))
     | _ -> Some PowerUnknown
+
+let parsePos (s: string) : SwitchPos option =
+    match s with
+    | null | "" -> None
+    | "on"        -> Some PosOn
+    | "off"       -> Some PosOff
+    | "generator" -> Some PosGenerator
+    | "line"      -> Some PosLine
+    | _           -> None
 
 let parseLan (s: string) : LanKind option =
     match s with
@@ -116,6 +125,8 @@ type Override = {
     kind    : string option
     powerFrom : string option
     lan       : string option
+    altFrom   : string option
+    position  : string option
 }
 
 let private readOpt (r: SqliteDataReader) (i: int) =
@@ -123,7 +134,7 @@ let private readOpt (r: SqliteDataReader) (i: int) =
 
 let loadOverrides (conn: SqliteConnection) : Map<string, Override> =
     use cmd = conn.CreateCommand()
-    cmd.CommandText <- "SELECT node_key, label, area, link, size, ac_input, kind, power_from, lan FROM health_node_overrides"
+    cmd.CommandText <- "SELECT node_key, label, area, link, size, ac_input, kind, power_from, lan, alt_from, position FROM health_node_overrides"
     use r = cmd.ExecuteReader()
     let acc = ResizeArray()
     while r.Read() do
@@ -137,18 +148,39 @@ let loadOverrides (conn: SqliteConnection) : Map<string, Override> =
               acInput = if r.IsDBNull 5 then None else Some (r.GetInt32 5 = 1)
               kind    = readOpt r 6
               powerFrom = readOpt r 7
-              lan       = readOpt r 8 })
+              lan       = readOpt r 8
+              altFrom   = readOpt r 9
+              position  = readOpt r 10 })
     acc |> Map.ofSeq
 
 let saveOverride (conn: SqliteConnection) (o: Override) =
+    // Merge with what is already stored: a partial update (e.g. only
+    // `position`) must not null the fields it omits. That silently reset a
+    // node's kind and power source once.
+    let existing = loadOverrides conn |> Map.tryFind o.nodeKey
+    let keep (incoming: string option) (previous: Override -> string option) =
+        match incoming with
+        | Some v when not (String.IsNullOrWhiteSpace v) -> Some v
+        | _ -> existing |> Option.bind previous
+    let o =
+        { o with
+            label     = keep o.label     (fun e -> e.label)
+            area      = keep o.area      (fun e -> e.area)
+            link      = keep o.link      (fun e -> e.link)
+            kind      = keep o.kind      (fun e -> e.kind)
+            powerFrom = keep o.powerFrom (fun e -> e.powerFrom)
+            lan       = keep o.lan       (fun e -> e.lan)
+            altFrom   = keep o.altFrom   (fun e -> e.altFrom)
+            position  = keep o.position  (fun e -> e.position)
+            size      = (match o.size with Some v -> Some v | None -> existing |> Option.bind (fun e -> e.size)) }
     use cmd = conn.CreateCommand()
     cmd.CommandText <- """
-INSERT INTO health_node_overrides (node_key, label, area, link, size, ac_input, kind, power_from, lan, updated_at)
-VALUES ($k, $label, $area, $link, $size, $ac, $kind, $pf, $lan, $now)
+INSERT INTO health_node_overrides (node_key, label, area, link, size, ac_input, kind, power_from, lan, alt_from, position, updated_at)
+VALUES ($k, $label, $area, $link, $size, $ac, $kind, $pf, $lan, $alt, $pos, $now)
 ON CONFLICT(node_key) DO UPDATE SET
     label = $label, area = $area, link = $link,
     size = $size, ac_input = $ac, kind = $kind,
-    power_from = $pf, lan = $lan, updated_at = $now"""
+    power_from = $pf, lan = $lan, alt_from = $alt, position = $pos, updated_at = $now"""
     cmd.Parameters.AddWithValue("$k", o.nodeKey) |> ignore
     cmd.Parameters.AddWithValue("$label", dbv o.label) |> ignore
     cmd.Parameters.AddWithValue("$area",  dbv o.area)  |> ignore
@@ -158,6 +190,8 @@ ON CONFLICT(node_key) DO UPDATE SET
     cmd.Parameters.AddWithValue("$kind",  dbv o.kind)  |> ignore
     cmd.Parameters.AddWithValue("$pf",  dbv o.powerFrom) |> ignore
     cmd.Parameters.AddWithValue("$lan", dbv o.lan) |> ignore
+    cmd.Parameters.AddWithValue("$alt", dbv o.altFrom) |> ignore
+    cmd.Parameters.AddWithValue("$pos", dbv o.position) |> ignore
     cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString "o") |> ignore
     cmd.ExecuteNonQuery() |> ignore
 
@@ -178,7 +212,9 @@ let applyOverrides (overrides: Map<string, Override>) (n: Node) : Node =
             size  = o.size |> Option.defaultValue n.size
             kind  = nonEmpty o.kind |> Option.defaultValue n.kind
             powerFrom = (o.powerFrom |> Option.bind parsePower |> Option.defaultValue n.powerFrom)
-            lan       = (o.lan       |> Option.bind parseLan   |> Option.defaultValue n.lan) }
+            lan       = (o.lan       |> Option.bind parseLan   |> Option.defaultValue n.lan)
+            altFrom   = (nonEmpty o.altFrom  |> Option.bind parsePower |> Option.defaultValue n.altFrom)
+            position  = (nonEmpty o.position |> Option.bind parsePos   |> Option.defaultValue n.position) }
 
 // ── Notes ────────────────────────────────────────────────────────────────────
 
@@ -232,7 +268,8 @@ let loadCustomNodes (conn: SqliteConnection) : Node list * Set<string> =
                   size = r.GetInt32 8
                   powerFrom = (readOpt r 6 |> Option.bind parsePower |> Option.defaultValue PowerUnknown)
                   lan       = (readOpt r 7 |> Option.bind parseLan   |> Option.defaultValue NoLan)
-                  btHost = None; needsInternet = false; wanFrom = None }
+                  btHost = None; needsInternet = false; wanFrom = None
+                  altFrom = PowerUnknown; position = PosUnset }
     List.ofSeq added, Set.ofSeq dead
 
 let addCustomNode (conn: SqliteConnection)

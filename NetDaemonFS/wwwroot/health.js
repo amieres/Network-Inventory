@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 28;
+const HEALTH_JS_VERSION = 29;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -305,6 +305,8 @@ function iconFor(kind, x, y, dim) {
     case 'pi':       return g('<rect x="2" y="2" width="8" height="8" rx="1"/><path d="M4 0v2 M8 0v2 M4 10v2 M8 10v2 M0 4h2 M0 8h2 M10 4h2 M10 8h2"/>');
     case 'computer': return g('<rect x="1" y="2" width="10" height="7" rx="1"/><path d="M4 11h4"/>');
     case 'esp32':    return g('<rect x="2" y="2" width="8" height="8" rx="1"/><path d="M4 0v2 M8 0v2 M0 5h2 M10 5h2"/>');
+    case 'breaker':  return g('<rect x="2" y="1" width="8" height="10" rx="1"/><path d="M6 3v3M4.5 7.5h3"/>');
+    case 'triple-switch': return g('<path d="M2 2.5h2M2 6h2M2 9.5h2"/><path d="M10 6L4 2.5"/><circle cx="10" cy="6" r="1"/>');
     case 'circuit':  return g('<path d="M2 6h3 l1.5-3 1.5 6 1-3h1.5"/>');
     case 'ev':       return g('<rect x="1" y="5" width="8" height="4" rx="1"/><path d="M2.5 5l1-2h4l1 2"/><path d="M11 4v4"/>');
     case 'opener':   return g('<rect x="1" y="4" width="10" height="7" rx="1"/><path d="M1 7h10"/>');
@@ -489,7 +491,7 @@ function renderDiagram() {
     const p = pos.get(n.key);
     const w = boxW(n), h = boxH(n);
     // No power => greyed out entirely. Radio down => only the link icon greys.
-    const noPower = n.powered === false;
+    const noPower = n.powered === false || n.position === 'off';
     const cls = noPower                     ? 'n-dead'
               : n.verdict === 'root-cause'  ? 'n-fault'
               : n.verdict === 'suppressed'  ? 'n-sup'
@@ -500,6 +502,7 @@ function renderDiagram() {
     else if (n.verdict === 'root-cause') tip = 'ROOT CAUSE' + (n.affected.length ? ' - affects ' + n.affected.join(', ') : '');
     else                                 tip = 'healthy';
     if (n.outputOn === false) tip += ' | output OFF';
+    if (n.position && n.position !== 'on') tip += ' | position: ' + n.position;
     if (n.remedy)             tip += ' | ' + n.remedy;
     if (n.note)               tip += '\n' + n.note;
 
@@ -514,6 +517,12 @@ function renderDiagram() {
       ? '<text class="n-blind" x="' + (p.x + w - 6) + '" y="' + (p.y + 11) + '">◍</text>' : '';
     const noteMark = n.note
       ? '<text class="n-note" x="' + (p.x + 6) + '" y="' + (p.y + h - 3) + '">✎</text>' : '';
+    const posText = { on: 'ON', off: 'OFF', generator: 'GEN', line: 'LINE' }[n.position] || '';
+    const posCls  = n.position === 'off' ? 'pos-off'
+                  : n.position === 'line' ? 'pos-line' : 'pos-on';
+    const posMark = posText
+      ? '<text class="n-pos ' + posCls + '" x="' + (p.x + w - 6) + '" y="' + (p.y + h - 4) + '">' +
+        posText + '</text>' : '';
 
     return '<g class="n-g' + sel + '" data-key="' + n.key + '">' +
       '<title>' + esc(n.label) + ' - ' + esc(tip) + '</title>' +
@@ -523,7 +532,7 @@ function renderDiagram() {
       (n.size === 1 ? '' :
         '<text class="n-kind" x="' + (p.x + 23) + '" y="' + (p.y + 26) + '">' + esc(n.kind) + '</text>') +
       ifaceIcons(n, p.x + w - 6, p.y + 4, n.radioUp !== false) +
-      outPip + blind + noteMark + '</g>';
+      outPip + blind + noteMark + posMark + '</g>';
   }
 
   const vb = [minX + diagramPan.x, minY + diagramPan.y, W / diagramZoom, H / diagramZoom].join(' ');
@@ -587,6 +596,9 @@ function openNodeEditor(key) {
   const pf = n.powerFrom || '';
   const pfKind = pf.indexOf(':') > 0 ? pf.split(':')[0] : '';
   const pfVal  = pf.indexOf(':') > 0 ? pf.slice(pf.indexOf(':') + 1) : '';
+  const isSwitch = n.kind === 'breaker' || n.kind === 'triple-switch';
+  const af = n.altFrom || '';
+  const afVal = af.indexOf(':') > 0 ? af.slice(af.indexOf(':') + 1) : '';
   const lanS = n.lan || 'none';
   const lanKind = lanS.indexOf(':') > 0 ? lanS.split(':')[0] : lanS;
   const lanVal  = lanS.indexOf(':') > 0 ? lanS.slice(lanS.indexOf(':') + 1) : '';
@@ -603,7 +615,8 @@ function openNodeEditor(key) {
     '<label>Area<select id="ed-area">' + opts(areas, n.area, '(none)') + '</select>' +
       '<input id="ed-area-new" placeholder="or type a new area"></label>' +
     // Power: one selector. "the area" means THIS node's area - no second picker.
-    '<label>Power from<select id="ed-power">' +
+    '<label>' + (n.kind === 'triple-switch' ? 'Generator feed (1st source)' : 'Power from') +
+      '<select id="ed-power">' +
       '<option value=""' + (!pf ? ' selected' : '') + '>(none / unknown)</option>' +
       '<option value="area"' + (pfKind === 'area' ? ' selected' : '') + '>the area it is in</option>' +
       deviceKeys.map(function (k) {
@@ -611,6 +624,27 @@ function openNodeEditor(key) {
                (pfKind === 'device' && pfVal === k ? ' selected' : '') + '>' + esc(k) + '</option>';
       }).join('') +
       '</select></label>' +
+    // Switchable devices: a breaker is On/Off, a manual triple switch selects
+    // between its Generator feed, Off, and its Line feed.
+    (isSwitch
+      ? '<label>Position<select id="ed-pos">' +
+          (n.kind === 'triple-switch'
+            ? '<option value="generator"' + (n.position === 'generator' ? ' selected' : '') + '>Generator</option>' +
+              '<option value="off"' + (n.position === 'off' ? ' selected' : '') + '>Off</option>' +
+              '<option value="line"' + (n.position === 'line' ? ' selected' : '') + '>Line</option>'
+            : '<option value="on"' + (n.position === 'on' ? ' selected' : '') + '>On</option>' +
+              '<option value="off"' + (n.position === 'off' ? ' selected' : '') + '>Off</option>') +
+          '</select></label>'
+      : '') +
+    (n.kind === 'triple-switch'
+      ? '<label>Line feed (2nd source)<select id="ed-alt">' +
+          '<option value="">(none)</option>' +
+          deviceKeys.map(function (k) {
+            return '<option value="device:' + esc(k) + '"' +
+                   (afVal === k ? ' selected' : '') + '>' + esc(k) + '</option>';
+          }).join('') +
+          '</select></label>'
+      : '') +
     // LAN: one selector. `none` is NOT `wired` - it means no network at all.
     '<label>LAN access<select id="ed-lan">' +
       '<option value="none"' + (lanKind === 'none' ? ' selected' : '') + '>none (not a smart device)</option>' +
@@ -694,7 +728,9 @@ async function saveNodeEditor() {
     kind:    document.getElementById('ed-kind').value || null,
     size:    parseInt(document.getElementById('ed-size').value, 10),
     powerFrom: powerFrom,
-    lan:       lan
+    lan:       lan,
+    position:  (document.getElementById('ed-pos') || {}).value || '',
+    altFrom:   (document.getElementById('ed-alt') || {}).value || ''
   };
   try {
     await api('POST', '/api/health/node', body);

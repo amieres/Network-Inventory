@@ -181,6 +181,8 @@ let private getTopology (svc: HealthService) : HttpHandler =
                    size      = n.size
                    link      = n.link
                    powerFrom = n.powerFrom.label
+                   altFrom   = n.altFrom.label
+                   position  = n.position.label
                    lan       = n.lan.label
                    // One entry per physical interface, straight from the
                    // inventory - the topology does not re-declare MACs or IPs.
@@ -270,6 +272,8 @@ type OverrideDto = {
     kind    : string
     powerFrom : string
     lan       : string
+    altFrom   : string
+    position  : string
 }
 
 let private saveNode (svc: HealthService) : HttpHandler =
@@ -288,7 +292,9 @@ let private saveNode (svc: HealthService) : HttpHandler =
                   acInput = Option.ofNullable dto.acInput
                   kind    = opt dto.kind
                   powerFrom = opt dto.powerFrom
-                  lan       = opt dto.lan }
+                  lan       = opt dto.lan
+                  altFrom   = opt dto.altFrom
+                  position  = opt dto.position }
             return! Response.ofJson {| ok = true |} ctx
     }
 
