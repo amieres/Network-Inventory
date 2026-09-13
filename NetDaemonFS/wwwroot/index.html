@@ -443,7 +443,38 @@
     .view-tab.active { background: #4f46e5; color: #fff; }
 
     /* ── Health panel ───────────────────────────────────────── */
-    #health { padding: 0 1.5rem 1rem; overflow: auto; flex: 1; min-height: 0; }
+    #health { padding: 0 1.5rem 0.5rem; overflow: auto; flex: 1; min-height: 0; }
+
+    /* Health view hides inventory-only chrome: Scan/Cleanup/search/columns were
+       eating a third of the viewport for controls that do nothing here. */
+    body.health-mode #btn-scan,
+    body.health-mode #btn-add-device,
+    body.health-mode #btn-cleanup,
+    body.health-mode #cleanup-age,
+    body.health-mode #btn-cols,
+    body.health-mode #search,
+    body.health-mode #shown-count,
+    body.health-mode #scan-status,
+    body.health-mode header > span:has(#btn-cleanup),
+    body.health-mode label[for="cleanup-age"] { display: none !important; }
+    body.health-mode header { padding: 0.5rem 1.5rem; gap: 1rem; }
+
+    /* The toolbar must stay reachable while the diagram scrolls. */
+    .diag-toolbar { position: sticky; top: 0; z-index: 5; background: #0f1117;
+                    padding: 0.3rem 0; }
+    .h-banner.compact { padding: 0.4rem 0.7rem; font-size: 0.8rem; margin: 0.35rem 0; }
+    .h-summary { cursor: pointer; user-select: none; font-size: 0.78rem; }
+    .h-caret   { color: #64748b; }
+    .h-banner.collapsed .h-details { display: none; }
+    /* Toolbar wraps on narrow windows; keep it on one line and let it scroll. */
+    .diag-toolbar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+    .diag-toolbar button { flex: 0 0 auto; white-space: nowrap; }
+    .diag-hint { flex: 0 0 auto; white-space: nowrap; }
+    #h-blind { font-size: 0.78rem; padding: 0.4rem 0.7rem; margin: 0.35rem 0; }
+    #h-blind .h-root { margin-top: 0.25rem; }
+    .h-stats { margin: 0.35rem 0; gap: 0.35rem; }
+    .h-stat  { padding: 0.22rem 0.55rem; font-size: 0.74rem; }
+    #diagram { flex: 0 0 auto; display: block; }
 
     .h-banner {
       margin: 0.9rem 0; padding: 0.7rem 0.9rem; border-radius: 6px;
@@ -494,7 +525,7 @@
 
     /* ── Diagram ────────────────────────────────────────────── */
     #diagram { margin: 1rem 0 0; }
-    #diagram svg { width: 100%; height: 460px; display: block; background: #0d0f16; border: 1px solid #2d3048; border-radius: 8px; resize: vertical; overflow: auto; }
+    #diagram svg { width: 100%; height: 44vh; min-height: 260px; display: block; background: #0d0f16; border: 1px solid #2d3048; border-radius: 8px; resize: vertical; overflow: auto; }
     .n-box   { stroke-width: 1.5; }
     .n-ok    { fill: #132a1c; stroke: #22c55e; }
     .n-fault { fill: #2a1315; stroke: #ef4444; }
@@ -544,6 +575,12 @@
                 text-transform: none !important; font-size: 0.82rem !important; color: #cbd5e1 !important; }
     .ed-check input { accent-color: #4f46e5; }
     .ed-meta { font-size: 0.72rem; color: #475569; }
+    .ed-body textarea {
+      background: #0f1117; border: 1px solid #2d3048; border-radius: 4px;
+      color: #e2e8f0; padding: 0.35rem 0.5rem; font-size: 0.82rem;
+      font-family: inherit; resize: vertical; text-transform: none; letter-spacing: normal;
+    }
+    .n-note { font: 9px 'Segoe UI', sans-serif; fill: #7c8cf8; }
     .ed-meta code { color: #7c8cf8; }
     .ed-ifaces { margin-top: 0.3rem; color: #64748b; font-family: ui-monospace, monospace; font-size: 0.68rem; }
     .ed-foot { padding: 0.6rem 1rem; border-top: 1px solid #2d3048;
@@ -561,7 +598,7 @@
     .lyr-sep { width: 1px; height: 16px; background: #2d3048; margin: 0 0.2rem; }
     .diag-toolbar button.lyr { opacity: 0.45; }
     .diag-toolbar button.lyr.on, .diag-toolbar button.on { opacity: 1; border-color: #4f46e5; color: #c7d2fe; }
-    .diag-legend { margin-top: 0.4rem; font-size: 0.72rem; color: #64748b; line-height: 1.6; }
+    .diag-legend { margin-top: 0.3rem; max-height: 2.6em; overflow: hidden; font-size: 0.72rem; color: #64748b; line-height: 1.6; }
     .diag-legend b { color: #fbbf24; }
     .lg-dead { color: #3f4250; }
     .lg-pip  { color: #f87171; }
@@ -587,7 +624,7 @@
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v86 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v89 · js <span id="js-version">?</span></span></h1>
   <span class="view-tabs">
     <button class="view-tab active" data-view="inventory">Inventory</button>
     <button class="view-tab"        data-view="health">Health</button>
@@ -644,7 +681,7 @@
     <b>◍</b> blind spot — its failure also takes Home Assistant down, so nothing would be reported ·
     <span class="lg-dead">grey box</span> = no power ·
     <span class="lg-pip">●</span> output switched off ·
-    grey radio icon = no wifi/bluetooth &middot; one icon per interface (wired / wifi / bluetooth) &mdash; hover for MAC &amp; IP &middot;
+    grey radio icon = no wifi/bluetooth &middot; one icon per interface (wired / wifi / bluetooth) &mdash; hover for MAC &amp; IP &middot; <span style="color:#7c8cf8">&#9998;</span> has notes &middot;
     SSID: <span style="color:#a78bfa">AbeEero</span>
     <span style="color:#38bdf8">ABEWNETG</span>
     <span style="color:#22d3ee">ABEWNETG-5G</span>
@@ -738,6 +775,6 @@
 <div id="ctx-menu" hidden></div>
 
 <script src="app.js?v=89"></script>
-<script src="health.js?v=16"></script>
+<script src="health.js?v=19"></script>
 </body>
 </html>

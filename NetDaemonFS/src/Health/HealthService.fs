@@ -351,6 +351,15 @@ type HealthService
         Store.migrate c
         Store.addCustomNode c key label kind area device entity powerFrom lan size
 
+    member _.GetNotes() : Map<string, string> =
+        try use c = openDb () in Store.loadNotes c
+        with _ -> Map.empty
+
+    member _.SaveNote(key, note) =
+        use c = openDb ()
+        Store.migrate c
+        Store.saveNote c key note
+
     member _.DeleteNode(key) =
         use c = openDb ()
         Store.migrate c

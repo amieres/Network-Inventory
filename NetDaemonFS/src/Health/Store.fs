@@ -59,6 +59,14 @@ CREATE TABLE IF NOT EXISTS health_user_edges (
     UNIQUE (child, parent, kind)
 );
 
+-- Free-text notes per device, so context that is not expressible as a field
+-- (quirks, how to recover it, what it is actually for) lives with the device.
+CREATE TABLE IF NOT EXISTS health_node_notes (
+    node_key   TEXT PRIMARY KEY NOT NULL,
+    note       TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- Hand-arranged diagram positions, so a layout is not tied to one browser.
 CREATE TABLE IF NOT EXISTS health_node_pos (
     node_key   TEXT PRIMARY KEY NOT NULL,
@@ -155,17 +163,46 @@ ON CONFLICT(node_key) DO UPDATE SET
 
 /// Layer stored edits over the seed topology.
 let applyOverrides (overrides: Map<string, Override>) (n: Node) : Node =
+    // An EMPTY string means "no override", not "set this to empty". Treating it
+    // as a value once blanked the labels and kinds of three nodes when their
+    // overrides were cleared.
+    let nonEmpty (v: string option) =
+        v |> Option.bind (fun x -> if String.IsNullOrWhiteSpace x then None else Some x)
     match overrides |> Map.tryFind n.key with
     | None -> n
     | Some o ->
         { n with
-            label = o.label |> Option.defaultValue n.label
+            label = nonEmpty o.label |> Option.defaultValue n.label
             area  = (match o.area with Some "" -> None | Some a -> Some a | None -> n.area)
             link  = (match o.link with Some "" -> None | Some l -> Some l | None -> n.link)
             size  = o.size |> Option.defaultValue n.size
-            kind  = o.kind |> Option.defaultValue n.kind
+            kind  = nonEmpty o.kind |> Option.defaultValue n.kind
             powerFrom = (o.powerFrom |> Option.bind parsePower |> Option.defaultValue n.powerFrom)
             lan       = (o.lan       |> Option.bind parseLan   |> Option.defaultValue n.lan) }
+
+// ── Notes ────────────────────────────────────────────────────────────────────
+
+let loadNotes (conn: SqliteConnection) : Map<string, string> =
+    use cmd = conn.CreateCommand()
+    cmd.CommandText <- "SELECT node_key, note FROM health_node_notes"
+    use r = cmd.ExecuteReader()
+    let acc = ResizeArray()
+    while r.Read() do acc.Add(r.GetString 0, r.GetString 1)
+    acc |> Map.ofSeq
+
+let saveNote (conn: SqliteConnection) (key: string) (note: string) =
+    use cmd = conn.CreateCommand()
+    if String.IsNullOrWhiteSpace note then
+        cmd.CommandText <- "DELETE FROM health_node_notes WHERE node_key = $k"
+        cmd.Parameters.AddWithValue("$k", key) |> ignore
+    else
+        cmd.CommandText <- """
+INSERT INTO health_node_notes (node_key, note, updated_at) VALUES ($k, $n, $now)
+ON CONFLICT(node_key) DO UPDATE SET note = $n, updated_at = $now"""
+        cmd.Parameters.AddWithValue("$k", key) |> ignore
+        cmd.Parameters.AddWithValue("$n", note) |> ignore
+        cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString "o") |> ignore
+    cmd.ExecuteNonQuery() |> ignore
 
 // ── Custom / deleted nodes ───────────────────────────────────────────────────
 // Devices added from the dashboard, plus tombstones that hide a seed node from
@@ -195,7 +232,7 @@ let loadCustomNodes (conn: SqliteConnection) : Node list * Set<string> =
                   size = r.GetInt32 8
                   powerFrom = (readOpt r 6 |> Option.bind parsePower |> Option.defaultValue PowerUnknown)
                   lan       = (readOpt r 7 |> Option.bind parseLan   |> Option.defaultValue NoLan)
-                  btHost = None; needsInternet = false }
+                  btHost = None; needsInternet = false; wanFrom = None }
     List.ofSeq added, Set.ofSeq dead
 
 let addCustomNode (conn: SqliteConnection)

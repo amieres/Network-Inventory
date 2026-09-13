@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 16;
+const HEALTH_JS_VERSION = 19;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -84,6 +84,9 @@ function switchView(view) {
   document.getElementById('stats-bar').hidden = !inv;
   document.getElementById('cat-bar').hidden   = !inv;
   document.getElementById('health').hidden    = inv;
+  // Scan/Cleanup/search/columns belong to the inventory, not to health - they
+  // were eating a third of the viewport in Health view.
+  document.body.classList.toggle('health-mode', !inv);
   if (!inv) loadHealth();
 }
 
@@ -121,7 +124,7 @@ function renderHealth() {
     banner.className = 'h-banner';
     banner.textContent = 'Learning reporting patterns from history…';
   } else if (faults === 0) {
-    banner.className = 'h-banner good';
+    banner.className = 'h-banner good compact';
     banner.innerHTML = 'All <b>' + d.total + '</b> devices reporting normally.' +
       // Helper faults are real but not actionable device problems, so they are
       // mentioned rather than counted as devices.
@@ -148,13 +151,25 @@ function renderHealth() {
   const bsEl = document.getElementById('h-blind');
   if (bs.length) {
     bsEl.hidden = false;
-    bsEl.innerHTML = '<b>Blind spots</b> — these would take Home Assistant down too, ' +
-      'so this dashboard would simply stop rather than warn you:' +
-      bs.map(function (n) {
-        return '<div class="h-root">' + esc(n.label) +
-               (n.remedy ? '<div class="h-remedy">→ ' + esc(n.remedy) + '</div>' : '') +
-               '</div>';
-      }).join('');
+    const open = localStorage.getItem('healthBlindOpen') === '1';
+    bsEl.className = 'h-banner' + (open ? '' : ' collapsed');
+    bsEl.innerHTML =
+      '<div class="h-summary" id="h-blind-toggle">' +
+        '<span class="h-caret">' + (open ? '▾' : '▸') + '</span> ' +
+        '<b>' + bs.length + ' blind spot' + (bs.length === 1 ? '' : 's') + '</b>' +
+        ' — failures this dashboard could not report' +
+      '</div>' +
+      '<div class="h-details">' +
+        bs.map(function (n) {
+          return '<div class="h-root">' + esc(n.label) +
+                 (n.remedy ? '<div class="h-remedy">→ ' + esc(n.remedy) + '</div>' : '') +
+                 '</div>';
+        }).join('') +
+      '</div>';
+    document.getElementById('h-blind-toggle').addEventListener('click', function () {
+      localStorage.setItem('healthBlindOpen', open ? '0' : '1');
+      renderHealth();
+    });
   } else {
     bsEl.hidden = true;
   }
@@ -251,6 +266,8 @@ function iconFor(kind, x, y, dim) {
     case 'plug':     return g('<path d="M4 1v3 M8 1v3"/><rect x="2" y="4" width="8" height="4" rx="1"/><path d="M6 8v3"/>');
     case 'camera':   return g('<rect x="1" y="3" width="8" height="7" rx="1"/><path d="M9 6l3-2v6l-3-2"/>');
     case 'ap':       return g('<path d="M1 5a7 7 0 0 1 10 0"/><path d="M3.5 7.5a3.5 3.5 0 0 1 5 0"/><circle cx="6" cy="10" r="1"/>');
+    case 'internet': return g('<circle cx="6" cy="6" r="5"/><path d="M1 6h10M6 1a8 8 0 0 1 0 10a8 8 0 0 1 0-10"/>');
+    case 'area':     return g('<rect x="1" y="2" width="10" height="8" rx="1" stroke-dasharray="2 2"/>');
     case 'modem':    return g('<rect x="1" y="6" width="10" height="5" rx="1"/><path d="M6 6V2"/><circle cx="3.5" cy="8.5" r=".6"/>');
     case 'pi':       return g('<rect x="2" y="2" width="8" height="8" rx="1"/><path d="M4 0v2 M8 0v2 M4 10v2 M8 10v2 M0 4h2 M0 8h2 M10 4h2 M10 8h2"/>');
     case 'computer': return g('<rect x="1" y="2" width="10" height="7" rx="1"/><path d="M4 11h4"/>');
@@ -432,6 +449,7 @@ function renderDiagram() {
     else                                 tip = 'healthy';
     if (n.outputOn === false) tip += ' | output OFF';
     if (n.remedy)             tip += ' | ' + n.remedy;
+    if (n.note)               tip += '\n' + n.note;
 
     const maxChars = n.size === 1 ? 14 : n.size === 3 ? 26 : 20;
     const label = n.label.length > maxChars ? n.label.slice(0, maxChars - 1) + '…' : n.label;
@@ -442,6 +460,8 @@ function renderDiagram() {
       ? '<circle class="pip-off" cx="' + (p.x + w - 8) + '" cy="' + (p.y + h - 7) + '" r="3"/>' : '';
     const blind = n.blindSpot
       ? '<text class="n-blind" x="' + (p.x + w - 6) + '" y="' + (p.y + 11) + '">◍</text>' : '';
+    const noteMark = n.note
+      ? '<text class="n-note" x="' + (p.x + 6) + '" y="' + (p.y + h - 3) + '">✎</text>' : '';
 
     return '<g class="n-g' + sel + '" data-key="' + n.key + '">' +
       '<title>' + esc(n.label) + ' - ' + esc(tip) + '</title>' +
@@ -451,7 +471,7 @@ function renderDiagram() {
       (n.size === 1 ? '' :
         '<text class="n-kind" x="' + (p.x + 23) + '" y="' + (p.y + 26) + '">' + esc(n.kind) + '</text>') +
       ifaceIcons(n, p.x + w - 6, p.y + 4, n.radioUp !== false) +
-      outPip + blind + '</g>';
+      outPip + blind + noteMark + '</g>';
   }
 
   const vb = [diagramPan.x, diagramPan.y, W / diagramZoom, H / diagramZoom].join(' ');
@@ -554,6 +574,8 @@ function openNodeEditor(key) {
       '<option value="2"' + (n.size === 2 ? ' selected' : '') + '>normal</option>' +
       '<option value="3"' + (n.size === 3 ? ' selected' : '') + '>large</option>' +
       '</select></label>' +
+    '<label>Notes<textarea id="ed-note" rows="3" placeholder="Quirks, how to recover it, what it is for...">' +
+      esc(n.note || '') + '</textarea></label>' +
     '<div class="ed-meta">key: <code>' + esc(n.key) + '</code>' +
       (n.device ? ' · inventory: ' + esc(n.device) : ' · <i>no inventory link</i>') +
       ((n.ifaces || []).length
@@ -618,6 +640,8 @@ async function saveNodeEditor() {
   };
   try {
     await api('POST', '/api/health/node', body);
+    const noteEl = document.getElementById('ed-note');
+    if (noteEl) await api('POST', '/api/health/note', { key: editingKey, note: noteEl.value });
     closeNodeEditor();
     await loadHealth();
   } catch (e) {

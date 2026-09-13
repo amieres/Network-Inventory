@@ -69,6 +69,9 @@ type Node = {
     /// Needs working internet (not just LAN) to function - cloud cameras, remote
     /// access. Brand-dependent, so it is declared per device.
     needsInternet : bool
+    /// The upstream service that feeds this node, for the WAN handoff: the
+    /// internet arrives AT the ONT, so the ONT depends on it.
+    wanFrom  : string option
 }
 
 /// Power can come from a specific device (grid, plug, power station, circuit,
@@ -121,7 +124,7 @@ module Topology =
           blindSpot = false; remedy = None
           outputEntity = None; link = None; size = 2
           powerFrom = PowerUnknown; lan = NoLan
-          btHost = None; needsInternet = false }
+          btHost = None; needsInternet = false; wanFrom = None }
 
     let nodes : Node list = [
         // ── Power sources ────────────────────────────────────────────────────
@@ -247,7 +250,7 @@ module Topology =
         yield { node "internet" "Internet (WAN)" "internet" with
                   entity = Some "binary_sensor.internet_up"; size = 3
                   remedy = Some "WAN down: LAN and WiFi keep working; cloud cameras, remote access and app-dependent devices do not"
-                  powerFrom = PowerUnknown; lan = Wired "modem" }
+                  powerFrom = PowerUnknown; lan = NoLan }
         // Nokia ONT at 10.0.0.1 (management address, reachable by ping from the
         // LAN). It is in BRIDGE mode - the eero holds the public IP directly
         // (eero reports double_nat: false, wan_ip 139.94.2.161) - so the ONT
@@ -255,7 +258,10 @@ module Topology =
         // all closed.
         yield { node "modem" "Nokia ONT (bridge, 10.0.0.1)" "modem" with
                   area = Some "Game Room"; size = 3
-                  powerFrom = FromArea "Game Room"; lan = NoLan }
+                  powerFrom = FromArea "Game Room"; lan = NoLan
+                  // The internet SUPPLIES the ONT: the WAN service arrives at it,
+                  // so the modem depends on the internet feed, not the reverse.
+                  wanFrom = Some "internet" }
         yield { node "eero" "eero" "ap" with
                   device = Some "eero"; link = Some "AbeEero"; size = 3
                   powerFrom = FromArea "Game Room"; lan = Wired "modem"
@@ -307,6 +313,9 @@ module Topology =
             | None   -> ()
             if n.needsInternet then
                 yield { child = n.key; parent = "internet"; kind = Network; note = Some "needs internet" }
+            match n.wanFrom with
+            | Some w -> yield { child = n.key; parent = w; kind = Network; note = Some "WAN service" }
+            | None   -> ()
     ]
 
     let nodeByKey = nodes |> List.map (fun n -> n.key, n) |> Map.ofList

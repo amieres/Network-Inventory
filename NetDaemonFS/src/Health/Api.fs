@@ -131,6 +131,7 @@ let private getTopology (svc: HealthService) : HttpHandler =
         // device with both ethernet and wifi (the Mac Studio) shows both, each
         // with its own MAC and IP, and a BLE-capable device gets a bluetooth icon.
         let deviceIfaces = svc.GetDeviceIfaces()
+        let notes = svc.GetNotes()
 
         // A node has no power when an ancestor power-edge parent is faulted, or
         // when the plug/station feeding it reports its output off.
@@ -183,6 +184,7 @@ let private getTopology (svc: HealthService) : HttpHandler =
                    lan       = n.lan.label
                    // One entry per physical interface, straight from the
                    // inventory - the topology does not re-declare MACs or IPs.
+                   note      = notes |> Map.tryFind n.key
                    ifaces    =
                      n.device
                      |> Option.bind (fun d -> deviceIfaces |> Map.tryFind d)
@@ -341,6 +343,16 @@ let private addNode (svc: HealthService) : HttpHandler =
 [<CLIMutable>]
 type KeyDto = { key : string }
 
+[<CLIMutable>]
+type NoteDto = { key : string; note : string }
+
+let private saveNote (svc: HealthService) : HttpHandler =
+    fun ctx -> task {
+        let! dto = Request.getJson<NoteDto> ctx
+        svc.SaveNote(dto.key, (if isNull dto.note then "" else dto.note))
+        return! Response.ofJson {| ok = true |} ctx
+    }
+
 let private deleteNode (svc: HealthService) : HttpHandler =
     fun ctx -> task {
         let! dto = Request.getJson<KeyDto> ctx
@@ -367,4 +379,5 @@ let routes (svc: HealthService) : HttpEndpoint list = [
     post "/api/health/positions" (savePositions svc)
     post "/api/health/node/new"  (addNode       svc)
     post "/api/health/node/del"  (deleteNode    svc)
+    post "/api/health/note"      (saveNote      svc)
 ]
