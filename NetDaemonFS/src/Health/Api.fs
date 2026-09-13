@@ -348,9 +348,17 @@ type NoteDto = { key : string; note : string }
 
 let private saveNote (svc: HealthService) : HttpHandler =
     fun ctx -> task {
-        let! dto = Request.getJson<NoteDto> ctx
-        svc.SaveNote(dto.key, (if isNull dto.note then "" else dto.note))
-        return! Response.ofJson {| ok = true |} ctx
+        try
+            let! dto = Request.getJson<NoteDto> ctx
+            // A missing key arrives as null and SQLite rejects the unbound
+            // parameter with "Value must be set" - a 500 for what is a bad request.
+            if String.IsNullOrWhiteSpace dto.key then
+                return! (Response.withStatusCode 400 >> Response.ofJson {| error = "key required" |}) ctx
+            else
+                svc.SaveNote(dto.key, (if isNull dto.note then "" else dto.note))
+                return! Response.ofJson {| ok = true |} ctx
+        with ex ->
+            return! (Response.withStatusCode 400 >> Response.ofJson {| error = ex.Message |}) ctx
     }
 
 let private deleteNode (svc: HealthService) : HttpHandler =

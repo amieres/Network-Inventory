@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 21;
+const HEALTH_JS_VERSION = 23;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -128,6 +128,32 @@ function renderHealth() {
   const d = healthData;
   if (!d) return;
 
+  // ── Headline: the whole summary on ONE line in the header strip, using the
+  // free space beside the Health toggle. Root causes still get their own line
+  // below when there are faults, since that is the actionable part.
+  const hl = document.getElementById('h-headline');
+  if (hl) {
+    const faultsN = d.stale + d.unavailable;
+    const chips = [
+      ['',            'All',         d.total],
+      ['ok',          'OK',          d.ok],
+      ['stale',       'Stale',       d.stale],
+      ['unavailable', 'Unavail',     d.unavailable],
+      ['retired',     'Retired',     d.retired]
+    ];
+    hl.innerHTML =
+      (faultsN === 0
+        ? '<span class="hl-ok">All ' + d.total + ' OK</span>'
+        : '<span class="hl-bad">' + faultsN + ' not reporting</span>') +
+      chips.map(function (c) {
+        return '<span class="hl-chip ' + (healthFilter === c[0] ? 'active' : '') +
+               '" data-hfilter="' + c[0] + '">' + c[1] + '<b>' + c[2] + '</b></span>';
+      }).join('') +
+      '<span class="hl-chip ' + (showHelpers ? 'active' : '') + '" id="hl-helpers">Helpers<b>' +
+        (d.helpers || 0) + '</b></span>' +
+      (d.helperFaults ? '<span class="hl-dim">' + d.helperFaults + ' helper stale</span>' : '');
+  }
+
   // ── Banner: lead with root causes, not a bare fault count ──
   const banner = document.getElementById('h-banner');
   const roots  = (topoData && topoData.rootCauses) || [];
@@ -137,17 +163,12 @@ function renderHealth() {
     banner.className = 'h-banner';
     banner.textContent = 'Learning reporting patterns from history…';
   } else if (faults === 0) {
-    banner.className = 'h-banner good compact';
-    banner.innerHTML = 'All <b>' + d.total + '</b> devices reporting normally.' +
-      // Helper faults are real but not actionable device problems, so they are
-      // mentioned rather than counted as devices.
-      (d.helperFaults
-        ? '<div class="h-root">' + d.helperFaults + ' helper sensor' +
-          (d.helperFaults === 1 ? '' : 's') + ' also stale — see the Helpers filter.</div>'
-        : '');
+    // Nothing to say that the headline does not already say.
+    banner.hidden = true;
   } else {
-    banner.className = 'h-banner bad';
-    let html = '<b>' + faults + '</b> device' + (faults === 1 ? '' : 's') + ' not reporting.';
+    banner.hidden = false;
+    banner.className = 'h-banner bad compact';
+    let html = '';
     roots.forEach(function (r) {
       html += '<div class="h-root">Root cause: <code>' + esc(r.label) + '</code>' +
               (r.affected.length
@@ -195,21 +216,14 @@ function renderHealth() {
     ['unavailable', 'Unavailable', d.unavailable, 'unav'],
     ['retired',     'Retired',     d.retired,     'retired']
   ];
-  document.getElementById('h-stats').innerHTML = chips.map(function (c) {
-    return '<span class="h-stat ' + c[3] + ' ' + (healthFilter === c[0] ? 'active' : '') +
-           '" data-hfilter="' + c[0] + '">' + c[1] + '<b>' + c[2] + '</b></span>';
-  }).join('');
-  document.getElementById('h-stats').innerHTML +=
-    '<span class="h-stat ' + (showHelpers ? 'active' : '') + '" id="h-helpers" ' +
-    'title="Alerts, template sensors and integration rows - monitored, but not physical devices">' +
-    'Helpers<b>' + (d.helpers || 0) + '</b></span>';
+  document.getElementById('h-stats').innerHTML = '';
   document.querySelectorAll('[data-hfilter]').forEach(function (el) {
     el.addEventListener('click', function () {
       healthFilter = el.dataset.hfilter;
       renderHealth();
     });
   });
-  const helpEl = document.getElementById('h-helpers');
+  const helpEl = document.getElementById('hl-helpers');
   if (helpEl) helpEl.addEventListener('click', function () {
     showHelpers = !showHelpers;
     renderHealth();
@@ -432,6 +446,9 @@ function renderDiagram() {
 
   function edgePath(e, i) {
     if (!layerOn[e.kind]) return '';
+    // Skip edges whose endpoints are gone (a deleted node leaves danglers) -
+    // they rendered as "null" coordinates.
+    if (!pos.get(e.parent) || !pos.get(e.child)) return '';
     // Wireless association is conveyed by the node's coloured radio icon, not by
     // a line - otherwise every device fans into one of three APs and the diagram
     // becomes unreadable. Only genuinely wired links get a network line.
@@ -514,7 +531,7 @@ function renderDiagram() {
       '<button id="btn-connect" class="' + (connectFrom ? 'on' : '') + '" ' +
         'title="Click this, then click two nodes to connect them">+ connection</button>' +
       '<span class="diag-hint">' +
-        (connectFrom ? 'click the PARENT (source) node…' : 'drag nodes · double-click to edit · scroll to zoom · ◍ = blind spot') +
+        (connectFrom ? 'click the PARENT (source) node…' : 'drag nodes · double-click to edit · Ctrl+scroll to zoom · ◍ = blind spot') +
       '</span>' +
     '</div>' +
     '<svg id="diag-svg" viewBox="' + vb + '" preserveAspectRatio="xMinYMin meet" xmlns="http://www.w3.org/2000/svg">' +
@@ -663,7 +680,9 @@ async function saveNodeEditor() {
   try {
     await api('POST', '/api/health/node', body);
     const noteEl = document.getElementById('ed-note');
-    if (noteEl) await api('POST', '/api/health/note', { key: editingKey, note: noteEl.value });
+    if (noteEl && editingKey) {
+      await api('POST', '/api/health/note', { key: editingKey, note: noteEl.value });
+    }
     closeNodeEditor();
     await loadHealth();
   } catch (e) {
@@ -842,6 +861,10 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H) {
   });
 
   svg.addEventListener('wheel', function (evt) {
+    // Plain wheel must scroll the PAGE - otherwise the diagram swallows it and
+    // the device list below is unreachable. Zoom needs Ctrl/Cmd (the usual
+    // convention) or the +/- buttons.
+    if (!evt.ctrlKey && !evt.metaKey) return;
     evt.preventDefault();
     const before = toSvg(evt);
     diagramZoom = evt.deltaY < 0 ? Math.min(4, diagramZoom * 1.1)

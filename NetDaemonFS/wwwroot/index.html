@@ -434,6 +434,18 @@
     [hidden] { display: none !important; }
 
     /* ── View switcher ──────────────────────────────────────── */
+    #h-headline { display: none; align-items: center; gap: 0.5rem; font-size: 0.78rem; flex-wrap: wrap; }
+    body.health-mode #h-headline { display: inline-flex; }
+    #h-headline .hl-ok   { color: #4ade80; font-weight: 600; }
+    #h-headline .hl-bad  { color: #fca5a5; font-weight: 600; }
+    #h-headline .hl-dim  { color: #64748b; }
+    #h-headline .hl-chip {
+      padding: 0.12rem 0.45rem; border: 1px solid #2d3048; border-radius: 10px;
+      color: #94a3b8; cursor: pointer; white-space: nowrap;
+    }
+    #h-headline .hl-chip.active { border-color: #4f46e5; background: #1e1b4b; color: #c7d2fe; }
+    #h-headline .hl-chip b { color: #e2e8f0; margin-left: 0.25rem; }
+
     .view-tabs { display: inline-flex; gap: 2px; background: #0f1117; border: 1px solid #2d3048; border-radius: 6px; padding: 2px; }
     .view-tab {
       padding: 0.25rem 0.7rem; border: none; background: transparent; color: #94a3b8;
@@ -443,11 +455,9 @@
     .view-tab.active { background: #4f46e5; color: #fff; }
 
     /* ── Health panel ───────────────────────────────────────── */
-    #health { padding: 0 1.5rem 0.5rem; flex: 1; min-height: 0;
-              display: flex; flex-direction: column; gap: 0.3rem; overflow: hidden; }
-    #health > .h-banner, #health > #h-blind, #health > .h-stats { flex: 0 0 auto; }
-    #diagram { flex: 1 1 auto; min-height: 200px; display: flex; flex-direction: column; }
-    #h-table-wrap { flex: 0 0 auto; max-height: 30vh; overflow: auto; }
+    #health { padding: 0 1.5rem 1rem; flex: 1; min-height: 0; overflow: auto; }
+    #diagram { display: flex; flex-direction: column; }
+    #h-table-wrap { overflow: visible; }
 
     /* Health view hides inventory-only chrome: Scan/Cleanup/search/columns were
        eating a third of the viewport for controls that do nothing here. */
@@ -531,7 +541,7 @@
 
     /* ── Diagram ────────────────────────────────────────────── */
     #diagram { margin: 1rem 0 0; }
-    #diagram svg { width: 100%; flex: 1 1 auto; min-height: 180px; display: block; background: #0d0f16; border: 1px solid #2d3048; border-radius: 8px; resize: vertical; overflow: auto; }
+    #diagram svg { width: 100%; height: 52vh; min-height: 260px; display: block; background: #0d0f16; border: 1px solid #2d3048; border-radius: 8px; resize: vertical; overflow: auto; }
     .n-box   { stroke-width: 1.5; }
     .n-ok    { fill: #132a1c; stroke: #22c55e; }
     .n-fault { fill: #2a1315; stroke: #ef4444; }
@@ -631,11 +641,12 @@
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v91 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v93 · js <span id="js-version">?</span></span></h1>
   <span class="view-tabs">
     <button class="view-tab active" data-view="inventory">Inventory</button>
     <button class="view-tab"        data-view="health">Health</button>
   </span>
+  <span id="h-headline"></span>
   <button id="btn-scan">Scan Now</button>
   <button id="btn-add-device" title="Add a device manually">+ Device</button>
   <span style="display:inline-flex;align-items:center;gap:4px">
@@ -680,10 +691,10 @@
 </div>
 
 <div id="health" hidden>
-  <div id="h-banner" class="h-banner">Loading health…</div>
-  <div id="h-blind" class="h-banner" hidden></div>
+  <div id="h-banner" class="h-banner" hidden>Loading health…</div>
   <div id="h-stats" class="h-stats"></div>
   <div id="diagram"></div>
+  <div id="h-blind" class="h-banner" hidden></div>
   <div class="diag-legend">
     <b>◍</b> blind spot — its failure also takes Home Assistant down, so nothing would be reported ·
     <span class="lg-dead">grey box</span> = no power ·
@@ -784,6 +795,6 @@
 <div id="ctx-menu" hidden></div>
 
 <script src="app.js?v=89"></script>
-<script src="health.js?v=21"></script>
+<script src="health.js?v=23"></script>
 </body>
 </html>
