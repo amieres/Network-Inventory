@@ -72,10 +72,15 @@ type Node = {
     /// The upstream service that feeds this node, for the WAN handoff: the
     /// internet arrives AT the ONT, so the ONT depends on it.
     wanFrom  : string option
-    /// A MANUAL TRIPLE SWITCH (the transfer-switch circuits) has two feeds and a
-    /// physical position. Only the selected feed is live, so the diagram must
-    /// follow the position rather than drawing both as active.
+    /// A second power feed. Its meaning depends on `feedMode`:
+    ///   Selected - a manual transfer switch picks ONE of the two (position)
+    ///   Both     - a 240 V device needs BOTH legs at once (the EV charger)
+    /// Same field, opposite semantics, and the difference matters for
+    /// diagnosis: losing either leg kills a 240 V device, whereas a switch
+    /// simply keeps running on whichever feed it is set to.
     altFrom  : PowerSource
+    /// How `powerFrom` and `altFrom` combine.
+    feedMode : FeedMode
     /// Position of a switchable device:
     ///   breaker       -> On | Off
     ///   triple switch -> Generator | Off | Line
@@ -84,6 +89,15 @@ type Node = {
 
 /// Physical position of a switchable device. `Generator` selects `powerFrom`,
 /// `Line` selects `altFrom`, and `Off` means nothing downstream is powered.
+/// How a node's two power feeds combine.
+and FeedMode =
+    /// Only one feed is live, chosen by the switch position.
+    | Selected
+    /// Both feeds are required - 240 V across two legs.
+    | Both
+    with
+        member this.label = match this with Selected -> "selected" | Both -> "both"
+
 and SwitchPos =
     | PosOn
     | PosOff
@@ -152,7 +166,7 @@ module Topology =
           outputEntity = None; link = None; size = 2
           powerFrom = PowerUnknown; lan = NoLan
           btHost = None; needsInternet = false; wanFrom = None
-          altFrom = PowerUnknown; position = PosUnset }
+          altFrom = PowerUnknown; position = PosUnset; feedMode = Selected }
 
     let nodes : Node list = [
         // ── Power sources ────────────────────────────────────────────────────
@@ -331,18 +345,26 @@ module Topology =
     /// icon rather than a line fanning into an AP.
     let derivedEdges (ns: Node list) : Edge list = [
         for n in ns do
-            // A triple switch passes power from exactly ONE of its two feeds,
-            // chosen by its physical position; Off passes nothing.
-            let activeSource =
-                match n.position with
-                | PosOff       -> PowerUnknown
-                | PosLine      -> n.altFrom
-                | PosGenerator -> n.powerFrom
-                | _            -> n.powerFrom
-            match activeSource with
-            | FromDevice k -> yield { child = n.key; parent = k; kind = Power; note = None }
-            | FromArea a   -> ()    // enclosed by the area rectangle; no line
-            | PowerUnknown -> ()
+            // 240 V devices need BOTH legs, so both are drawn and either one
+            // failing takes the device down. A transfer switch instead passes
+            // power from exactly ONE feed, chosen by its position.
+            let emit note src =
+                match src with
+                | FromDevice k -> Some { child = n.key; parent = k; kind = Power; note = note }
+                | FromArea _   -> None    // enclosed by the area rectangle; no line
+                | PowerUnknown -> None
+            match n.feedMode with
+            | Both ->
+                yield! [ emit (Some "240V leg 1") n.powerFrom
+                         emit (Some "240V leg 2") n.altFrom ] |> List.choose id
+            | Selected ->
+                let activeSource =
+                    match n.position with
+                    | PosOff       -> PowerUnknown
+                    | PosLine      -> n.altFrom
+                    | PosGenerator -> n.powerFrom
+                    | _            -> n.powerFrom
+                yield! [ emit None activeSource ] |> List.choose id
             match n.lan with
             | Wired src   -> yield { child = n.key; parent = src; kind = Network; note = Some "wired" }
             | Powerline a -> ()     // wired access via the area; no line

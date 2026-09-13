@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS health_node_pos (
     cmd.ExecuteNonQuery() |> ignore
 
     // Columns added after the first release.
-    for col, decl in [ "power_from", "TEXT"; "lan", "TEXT"; "alt_from", "TEXT"; "position", "TEXT" ] do
+    for col, decl in [ "power_from", "TEXT"; "lan", "TEXT"; "alt_from", "TEXT"; "position", "TEXT"; "feed_mode", "TEXT" ] do
         use chk = conn.CreateCommand()
         chk.CommandText <- $"SELECT COUNT(*) FROM pragma_table_info('health_node_overrides') WHERE name = '{col}'"
         if (chk.ExecuteScalar() :?> int64) = 0L then
@@ -104,6 +104,12 @@ let parsePos (s: string) : SwitchPos option =
     | "line"      -> Some PosLine
     | _           -> None
 
+let parseFeed (s: string) : FeedMode option =
+    match s with
+    | "both"     -> Some Both
+    | "selected" -> Some Selected
+    | _          -> None
+
 let parseLan (s: string) : LanKind option =
     match s with
     | null | "" -> None
@@ -127,6 +133,7 @@ type Override = {
     lan       : string option
     altFrom   : string option
     position  : string option
+    feedMode  : string option
 }
 
 let private readOpt (r: SqliteDataReader) (i: int) =
@@ -134,7 +141,7 @@ let private readOpt (r: SqliteDataReader) (i: int) =
 
 let loadOverrides (conn: SqliteConnection) : Map<string, Override> =
     use cmd = conn.CreateCommand()
-    cmd.CommandText <- "SELECT node_key, label, area, link, size, ac_input, kind, power_from, lan, alt_from, position FROM health_node_overrides"
+    cmd.CommandText <- "SELECT node_key, label, area, link, size, ac_input, kind, power_from, lan, alt_from, position, feed_mode FROM health_node_overrides"
     use r = cmd.ExecuteReader()
     let acc = ResizeArray()
     while r.Read() do
@@ -150,7 +157,8 @@ let loadOverrides (conn: SqliteConnection) : Map<string, Override> =
               powerFrom = readOpt r 7
               lan       = readOpt r 8
               altFrom   = readOpt r 9
-              position  = readOpt r 10 })
+              position  = readOpt r 10
+              feedMode  = readOpt r 11 })
     acc |> Map.ofSeq
 
 let saveOverride (conn: SqliteConnection) (o: Override) =
@@ -172,15 +180,17 @@ let saveOverride (conn: SqliteConnection) (o: Override) =
             lan       = keep o.lan       (fun e -> e.lan)
             altFrom   = keep o.altFrom   (fun e -> e.altFrom)
             position  = keep o.position  (fun e -> e.position)
+            feedMode  = keep o.feedMode  (fun e -> e.feedMode)
             size      = (match o.size with Some v -> Some v | None -> existing |> Option.bind (fun e -> e.size)) }
     use cmd = conn.CreateCommand()
     cmd.CommandText <- """
-INSERT INTO health_node_overrides (node_key, label, area, link, size, ac_input, kind, power_from, lan, alt_from, position, updated_at)
-VALUES ($k, $label, $area, $link, $size, $ac, $kind, $pf, $lan, $alt, $pos, $now)
+INSERT INTO health_node_overrides (node_key, label, area, link, size, ac_input, kind, power_from, lan, alt_from, position, feed_mode, updated_at)
+VALUES ($k, $label, $area, $link, $size, $ac, $kind, $pf, $lan, $alt, $pos, $feed, $now)
 ON CONFLICT(node_key) DO UPDATE SET
     label = $label, area = $area, link = $link,
     size = $size, ac_input = $ac, kind = $kind,
-    power_from = $pf, lan = $lan, alt_from = $alt, position = $pos, updated_at = $now"""
+    power_from = $pf, lan = $lan, alt_from = $alt, position = $pos,
+    feed_mode = $feed, updated_at = $now"""
     cmd.Parameters.AddWithValue("$k", o.nodeKey) |> ignore
     cmd.Parameters.AddWithValue("$label", dbv o.label) |> ignore
     cmd.Parameters.AddWithValue("$area",  dbv o.area)  |> ignore
@@ -192,6 +202,7 @@ ON CONFLICT(node_key) DO UPDATE SET
     cmd.Parameters.AddWithValue("$lan", dbv o.lan) |> ignore
     cmd.Parameters.AddWithValue("$alt", dbv o.altFrom) |> ignore
     cmd.Parameters.AddWithValue("$pos", dbv o.position) |> ignore
+    cmd.Parameters.AddWithValue("$feed", dbv o.feedMode) |> ignore
     cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString "o") |> ignore
     cmd.ExecuteNonQuery() |> ignore
 
@@ -214,7 +225,8 @@ let applyOverrides (overrides: Map<string, Override>) (n: Node) : Node =
             powerFrom = (o.powerFrom |> Option.bind parsePower |> Option.defaultValue n.powerFrom)
             lan       = (o.lan       |> Option.bind parseLan   |> Option.defaultValue n.lan)
             altFrom   = (nonEmpty o.altFrom  |> Option.bind parsePower |> Option.defaultValue n.altFrom)
-            position  = (nonEmpty o.position |> Option.bind parsePos   |> Option.defaultValue n.position) }
+            position  = (nonEmpty o.position |> Option.bind parsePos   |> Option.defaultValue n.position)
+            feedMode  = (nonEmpty o.feedMode |> Option.bind parseFeed  |> Option.defaultValue n.feedMode) }
 
 // ── Notes ────────────────────────────────────────────────────────────────────
 
@@ -269,7 +281,7 @@ let loadCustomNodes (conn: SqliteConnection) : Node list * Set<string> =
                   powerFrom = (readOpt r 6 |> Option.bind parsePower |> Option.defaultValue PowerUnknown)
                   lan       = (readOpt r 7 |> Option.bind parseLan   |> Option.defaultValue NoLan)
                   btHost = None; needsInternet = false; wanFrom = None
-                  altFrom = PowerUnknown; position = PosUnset }
+                  altFrom = PowerUnknown; position = PosUnset; feedMode = Selected }
     List.ofSeq added, Set.ofSeq dead
 
 let addCustomNode (conn: SqliteConnection)

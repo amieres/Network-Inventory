@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 31;
+const HEALTH_JS_VERSION = 32;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -532,6 +532,7 @@ function renderDiagram() {
     else                                 tip = 'healthy';
     if (n.outputOn === false) tip += ' | output OFF';
     if (n.position && n.position !== 'on') tip += ' | position: ' + n.position;
+    if (n.feedMode === 'both') tip += ' | 240 V: needs both legs';
     if (n.remedy)             tip += ' | ' + n.remedy;
     if (n.note)               tip += '\n' + n.note;
 
@@ -546,6 +547,8 @@ function renderDiagram() {
       ? '<text class="n-blind" x="' + (p.x + w - 6) + '" y="' + (p.y + 11) + '">◍</text>' : '';
     const noteMark = n.note
       ? '<text class="n-note" x="' + (p.x + 6) + '" y="' + (p.y + h - 3) + '">✎</text>' : '';
+    const dualMark = n.feedMode === 'both'
+      ? '<text class="n-dual" x="' + (p.x + w - 6) + '" y="' + (p.y + 11) + '">240V</text>' : '';
     const posText = { on: 'ON', off: 'OFF', generator: 'GEN', line: 'LINE' }[n.position] || '';
     const posCls  = n.position === 'off' ? 'pos-off'
                   : n.position === 'line' ? 'pos-line' : 'pos-on';
@@ -561,7 +564,7 @@ function renderDiagram() {
       (n.size === 1 ? '' :
         '<text class="n-kind" x="' + (p.x + 23) + '" y="' + (p.y + 26) + '">' + esc(n.kind) + '</text>') +
       ifaceIcons(n, p.x + w - 6, p.y + 4, n.radioUp !== false) +
-      outPip + blind + noteMark + posMark + '</g>';
+      outPip + blind + noteMark + posMark + dualMark + '</g>';
   }
 
   const vb = [minX + diagramPan.x, minY + diagramPan.y, W / diagramZoom, H / diagramZoom].join(' ');
@@ -665,8 +668,13 @@ function openNodeEditor(key) {
               '<option value="off"' + (n.position === 'off' ? ' selected' : '') + '>Off</option>') +
           '</select></label>'
       : '') +
-    (n.kind === 'triple-switch'
-      ? '<label>Line feed (2nd source)<select id="ed-alt">' +
+    // 240 V devices need BOTH legs at once - a different reason for a second
+    // feed than the transfer switch, which selects one of two.
+    '<label class="ed-check"><input type="checkbox" id="ed-240"' +
+      (n.feedMode === 'both' ? ' checked' : '') + '> 240 V (needs two legs)</label>' +
+    (n.kind === 'triple-switch' || n.feedMode === 'both'
+      ? '<label>' + (n.feedMode === 'both' ? 'Second leg (240 V)' : 'Line feed (2nd source)') +
+        '<select id="ed-alt">' +
           '<option value="">(none)</option>' +
           deviceKeys.map(function (k) {
             return '<option value="device:' + esc(k) + '"' +
@@ -713,6 +721,17 @@ function openNodeEditor(key) {
 
   document.getElementById('node-editor-title').textContent = 'Edit ' + n.label;
   document.getElementById('node-editor').hidden = false;
+
+  const dual = document.getElementById('ed-240');
+  if (dual) {
+    dual.addEventListener('change', function () {
+      // Re-open so the second-leg selector appears or disappears.
+      const cur = Object.assign({}, n, { feedMode: dual.checked ? 'both' : 'selected' });
+      const idx = topoData.nodes.findIndex(function (x) { return x.key === n.key; });
+      if (idx >= 0) topoData.nodes[idx] = cur;
+      openNodeEditor(n.key);
+    });
+  }
 
   const kindSel = document.getElementById('ed-kind');
   const kindNew = document.getElementById('ed-kind-new');
@@ -779,6 +798,7 @@ async function saveNodeEditor() {
     powerFrom: powerFrom,
     lan:       lan,
     position:  (document.getElementById('ed-pos') || {}).value || '',
+    feedMode:  (document.getElementById('ed-240') || {}).checked ? 'both' : 'selected',
     altFrom:   (document.getElementById('ed-alt') || {}).value || ''
   };
   // A key change has to happen FIRST, so the override/note writes below land on

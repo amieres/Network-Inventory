@@ -123,7 +123,10 @@ let private getTopology (svc: HealthService) : HttpHandler =
         let liveNodes = svc.GetNodes()
         let liveEdges = svc.GetEdges()
         let liveByKey = liveNodes |> List.map (fun n -> n.key, n) |> Map.ofList
-        let verdicts = Correlate.analyse isFaulted
+        // Analyse the LIVE graph (seed + overrides + derived + user edges), not the
+        // empty hardcoded list - every edge is derived now, so the old call
+        // explained nothing.
+        let verdicts = Correlate.analyseWith liveNodes liveEdges isFaulted
 
         // Raw entity states, for output/link indicators.
         let entRaw = svc.GetRawStates()
@@ -183,6 +186,7 @@ let private getTopology (svc: HealthService) : HttpHandler =
                    powerFrom = n.powerFrom.label
                    altFrom   = n.altFrom.label
                    position  = n.position.label
+                   feedMode  = n.feedMode.label
                    lan       = n.lan.label
                    // One entry per physical interface, straight from the
                    // inventory - the topology does not re-declare MACs or IPs.
@@ -285,6 +289,7 @@ type OverrideDto = {
     lan       : string
     altFrom   : string
     position  : string
+    feedMode  : string
 }
 
 let private saveNode (svc: HealthService) : HttpHandler =
@@ -305,7 +310,8 @@ let private saveNode (svc: HealthService) : HttpHandler =
                   powerFrom = opt dto.powerFrom
                   lan       = opt dto.lan
                   altFrom   = opt dto.altFrom
-                  position  = opt dto.position }
+                  position  = opt dto.position
+                  feedMode  = opt dto.feedMode }
             return! Response.ofJson {| ok = true |} ctx
     }
 

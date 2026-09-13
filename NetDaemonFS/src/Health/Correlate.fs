@@ -30,39 +30,41 @@ type NodeVerdict = {
 /// `isFaulted key` reports whether a topology node is currently in a fault state.
 /// Nodes with no health signal at all (circuits, SSIDs) are inferred: a circuit
 /// is considered faulted only when its parent is, since nothing measures it.
-let analyse (isFaulted: string -> bool) : NodeVerdict list =
-    let faulted = Topology.nodes |> List.map (fun n -> n.key, isFaulted n.key) |> Map.ofList
+let analyseWith (nodes: Node list) (edges: Edge list) (isFaulted: string -> bool) : NodeVerdict list =
+    let parentsOf k = edges |> List.filter (fun e -> e.child = k)
+    let childrenOf k = edges |> List.filter (fun e -> e.parent = k)
+    let byKey = nodes |> List.map (fun n -> n.key, n) |> Map.ofList
+    let faulted = nodes |> List.map (fun n -> n.key, isFaulted n.key) |> Map.ofList
     let isF k = faulted |> Map.tryFind k |> Option.defaultValue false
 
-    // Descendants of a node, for the "affected" list on a root cause.
     let rec descendants seen key =
-        Topology.childrenOf key
+        childrenOf key
         |> List.collect (fun e ->
             if Set.contains e.child seen then []
             else e.child :: descendants (Set.add e.child seen) e.child)
         |> List.distinct
 
-    Topology.nodes
+    nodes
     |> List.map (fun n ->
         if not (isF n.key) then
             { key = n.key; label = n.label; faulted = false; verdict = Healthy }
         else
-            // Nearest faulted ancestor explains this fault.
-            let explaining =
-                Topology.parentsOf n.key
-                |> List.tryFind (fun e -> isF e.parent)
-            match explaining with
+            match parentsOf n.key |> List.tryFind (fun e -> isF e.parent) with
             | Some e ->
                 let parentLabel =
-                    Topology.nodeByKey |> Map.tryFind e.parent |> Option.map (fun p -> p.label) |> Option.defaultValue e.parent
+                    byKey |> Map.tryFind e.parent |> Option.map (fun p -> p.label) |> Option.defaultValue e.parent
                 { key = n.key; label = n.label; faulted = true
                   verdict = Suppressed (parentLabel, e.kind) }
             | None ->
                 let affected =
                     descendants (Set.singleton n.key) n.key
                     |> List.filter isF
-                    |> List.choose (fun k -> Topology.nodeByKey |> Map.tryFind k |> Option.map (fun p -> p.label))
+                    |> List.choose (fun k -> byKey |> Map.tryFind k |> Option.map (fun p -> p.label))
                 { key = n.key; label = n.label; faulted = true; verdict = RootCause affected })
+
+/// Convenience wrapper over the seed topology plus its derived edges.
+let analyse (isFaulted: string -> bool) : NodeVerdict list =
+    analyseWith Topology.nodes (Topology.edges @ Topology.derivedEdges Topology.nodes) isFaulted
 
 /// Just the root causes, most impactful first - what a dashboard banner shows.
 let rootCauses (verdicts: NodeVerdict list) =
