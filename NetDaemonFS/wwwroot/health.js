@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 19;
+const HEALTH_JS_VERSION = 21;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -17,7 +17,17 @@ let showHelpers  = false;  // helpers are monitored but are not things you can f
 // an auto-layout can only guess at a physical arrangement the user knows.
 let diagramZoom = 1;
 let diagramPan  = { x: 0, y: 0 };
-let nodePos     = JSON.parse(localStorage.getItem('healthNodePos') || '{}');
+let nodePos     = (function () {
+  // Discard non-finite entries left by an earlier broken render, otherwise the
+  // NaN is re-read on every load and poisons the diagram again.
+  const raw = JSON.parse(localStorage.getItem('healthNodePos') || '{}');
+  const clean = {};
+  Object.keys(raw).forEach(function (k) {
+    const p = raw[k];
+    if (p && isFinite(p.x) && isFinite(p.y)) clean[k] = p;
+  });
+  return clean;
+})();
 
 // Hand-arranged positions are real work and easy to destroy with one careless
 // clear, so every save also keeps a rolling backup and a timestamped snapshot.
@@ -30,9 +40,12 @@ function saveNodePos() {
   // Also persist server-side so a layout is not trapped in one browser.
   clearTimeout(saveNodePos._t);
   saveNodePos._t = setTimeout(function () {
-    const ps = Object.keys(nodePos).map(function (k) {
-      return { key: k, x: nodePos[k].x, y: nodePos[k].y };
-    });
+    const ps = Object.keys(nodePos)
+      .filter(function (k) {
+        const p = nodePos[k];
+        return p && isFinite(p.x) && isFinite(p.y);
+      })
+      .map(function (k) { return { key: k, x: nodePos[k].x, y: nodePos[k].y }; });
     if (ps.length) api('POST', '/api/health/positions', ps).catch(function () {});
   }, 800);
 }
@@ -384,9 +397,18 @@ function renderDiagram() {
   byDepth.forEach(function (list, dp) {
     list.forEach(function (n, i) {
       const saved = nodePos[n.key];
-      pos.set(n.key, saved ? { x: saved.x, y: saved.y }
-                           : { x: PAD + dp * COL_W, y: PAD + i * ROW_H });
+      const ok = saved && isFinite(saved.x) && isFinite(saved.y);
+      pos.set(n.key, ok ? { x: saved.x, y: saved.y }
+                        : { x: PAD + dp * COL_W, y: PAD + i * ROW_H });
     });
+  });
+  // Safety net: every node MUST have a finite position, or one missing entry
+  // turns the whole diagram into NaN.
+  nodes.forEach(function (n, i) {
+    const p = pos.get(n.key);
+    if (!p || !isFinite(p.x) || !isFinite(p.y)) {
+      pos.set(n.key, { x: PAD + (i % 6) * COL_W, y: PAD + Math.floor(i / 6) * ROW_H });
+    }
   });
 
   const byKey = new Map(nodes.map(function (n) { return [n.key, n]; }));
@@ -801,8 +823,11 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H) {
     const p = toSvg(evt);
     if (drag.kind === 'node') {
       // Snap to a grid so hand-arranged layouts stay tidy.
-      nodePos[drag.key] = { x: snap(p.x - drag.dx), y: snap(p.y - drag.dy) };
-      redrawPositions();
+      const nx = snap(p.x - drag.dx), ny = snap(p.y - drag.dy);
+      if (isFinite(nx) && isFinite(ny)) {
+        nodePos[drag.key] = { x: nx, y: ny };
+        redrawPositions();
+      }
     } else {
       diagramPan.x = drag.px - (p.x - drag.x0);
       diagramPan.y = drag.py - (p.y - drag.y0);

@@ -362,9 +362,21 @@ let private deleteNode (svc: HealthService) : HttpHandler =
 
 let private savePositions (svc: HealthService) : HttpHandler =
     fun ctx -> task {
-        let! ps = Request.getJson<PosDto[]> ctx
-        svc.SavePositions(ps |> Array.toList |> List.map (fun p -> p.key, p.x, p.y))
-        return! Response.ofJson {| ok = true; saved = ps.Length |} ctx
+        try
+            let! ps = Request.getJson<PosDto[]> ctx
+            // Reject non-finite coordinates rather than 500: a client-side NaN
+            // used to take this endpoint down entirely.
+            let good =
+                ps
+                |> Array.filter (fun p ->
+                    not (String.IsNullOrWhiteSpace p.key)
+                    && Double.IsFinite p.x && Double.IsFinite p.y)
+                |> Array.toList
+                |> List.map (fun p -> p.key, p.x, p.y)
+            svc.SavePositions good
+            return! Response.ofJson {| ok = true; saved = List.length good; rejected = ps.Length - List.length good |} ctx
+        with ex ->
+            return! (Response.withStatusCode 400 >> Response.ofJson {| error = ex.Message |}) ctx
     }
 
 // ── Routes ───────────────────────────────────────────────────────────────────

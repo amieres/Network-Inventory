@@ -443,7 +443,11 @@
     .view-tab.active { background: #4f46e5; color: #fff; }
 
     /* ── Health panel ───────────────────────────────────────── */
-    #health { padding: 0 1.5rem 0.5rem; overflow: auto; flex: 1; min-height: 0; }
+    #health { padding: 0 1.5rem 0.5rem; flex: 1; min-height: 0;
+              display: flex; flex-direction: column; gap: 0.3rem; overflow: hidden; }
+    #health > .h-banner, #health > #h-blind, #health > .h-stats { flex: 0 0 auto; }
+    #diagram { flex: 1 1 auto; min-height: 200px; display: flex; flex-direction: column; }
+    #h-table-wrap { flex: 0 0 auto; max-height: 30vh; overflow: auto; }
 
     /* Health view hides inventory-only chrome: Scan/Cleanup/search/columns were
        eating a third of the viewport for controls that do nothing here. */
@@ -462,7 +466,7 @@
     /* The toolbar must stay reachable while the diagram scrolls. */
     .diag-toolbar { position: sticky; top: 0; z-index: 5; background: #0f1117;
                     padding: 0.3rem 0; }
-    .h-banner.compact { padding: 0.4rem 0.7rem; font-size: 0.8rem; margin: 0.35rem 0; }
+    .h-banner.compact { padding: 0.35rem 0.7rem; font-size: 0.78rem; margin: 0.3rem 0; line-height: 1.35; }
     .h-summary { cursor: pointer; user-select: none; font-size: 0.78rem; }
     .h-caret   { color: #64748b; }
     .h-banner.collapsed .h-details { display: none; }
@@ -472,8 +476,10 @@
     .diag-hint { flex: 0 0 auto; white-space: nowrap; }
     #h-blind { font-size: 0.78rem; padding: 0.4rem 0.7rem; margin: 0.35rem 0; }
     #h-blind .h-root { margin-top: 0.25rem; }
-    .h-stats { margin: 0.35rem 0; gap: 0.35rem; }
-    .h-stat  { padding: 0.22rem 0.55rem; font-size: 0.74rem; }
+    .h-stats { margin: 0.3rem 0; gap: 0.3rem; flex-wrap: nowrap;
+               overflow-x: auto; scrollbar-width: thin; }
+    .h-stat  { padding: 0.18rem 0.5rem; font-size: 0.72rem; flex: 0 0 auto; }
+    .h-stat b { font-size: 0.86rem; }
     #diagram { flex: 0 0 auto; display: block; }
 
     .h-banner {
@@ -525,7 +531,7 @@
 
     /* ── Diagram ────────────────────────────────────────────── */
     #diagram { margin: 1rem 0 0; }
-    #diagram svg { width: 100%; height: 44vh; min-height: 260px; display: block; background: #0d0f16; border: 1px solid #2d3048; border-radius: 8px; resize: vertical; overflow: auto; }
+    #diagram svg { width: 100%; flex: 1 1 auto; min-height: 180px; display: block; background: #0d0f16; border: 1px solid #2d3048; border-radius: 8px; resize: vertical; overflow: auto; }
     .n-box   { stroke-width: 1.5; }
     .n-ok    { fill: #132a1c; stroke: #22c55e; }
     .n-fault { fill: #2a1315; stroke: #ef4444; }
@@ -598,7 +604,8 @@
     .lyr-sep { width: 1px; height: 16px; background: #2d3048; margin: 0 0.2rem; }
     .diag-toolbar button.lyr { opacity: 0.45; }
     .diag-toolbar button.lyr.on, .diag-toolbar button.on { opacity: 1; border-color: #4f46e5; color: #c7d2fe; }
-    .diag-legend { margin-top: 0.3rem; max-height: 2.6em; overflow: hidden; font-size: 0.72rem; color: #64748b; line-height: 1.6; }
+    .diag-legend { margin-top: 0.25rem; white-space: nowrap; overflow-x: auto;
+                   flex: 0 0 auto; scrollbar-width: thin; font-size: 0.72rem; color: #64748b; line-height: 1.6; }
     .diag-legend b { color: #fbbf24; }
     .lg-dead { color: #3f4250; }
     .lg-pip  { color: #f87171; }
@@ -624,7 +631,7 @@
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v89 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v91 · js <span id="js-version">?</span></span></h1>
   <span class="view-tabs">
     <button class="view-tab active" data-view="inventory">Inventory</button>
     <button class="view-tab"        data-view="health">Health</button>
@@ -703,6 +710,7 @@
     </div>
   </div>
 
+  <div id="h-table-wrap">
   <table id="h-table">
     <thead>
       <tr>
@@ -715,6 +723,7 @@
     </thead>
     <tbody id="h-tbody"></tbody>
   </table>
+  </div>
 </div>
 
 <div id="col-modal" hidden>
@@ -775,6 +784,6 @@
 <div id="ctx-menu" hidden></div>
 
 <script src="app.js?v=89"></script>
-<script src="health.js?v=19"></script>
+<script src="health.js?v=21"></script>
 </body>
 </html>
