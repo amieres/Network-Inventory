@@ -90,6 +90,23 @@ let thresholdFor (cadence: Cadence) : TimeSpan option =
         Some (if t < minThreshold then minThreshold elif t > maxThreshold then maxThreshold else t)
     | Event _ | Sparse _ -> None
 
+// ── Status flags ─────────────────────────────────────────────────────────────
+// A binary "is it connected / is there a problem" sensor is healthy precisely
+// when it does NOT change: `binary_sensor.ac500_connected_2` sat at `on` for
+// 19 hours while the AC500 was fine and its power data updated every few
+// seconds - yet staleness flagged it, painting two healthy Bluettis red.
+//
+// These get a LIVENESS watch instead: we care that HA still has a value, not
+// that the value keeps moving. Whether the underlying device is really alive is
+// answered by its own data sensors, which do have a cadence.
+let statusHints =
+    [ "_connected"; "_connection"; "_online"; "_status"; "_available"
+      "_problem"; "_alarm"; "_fault"; "_restrictions"; "_enabled" ]
+
+let isStatusFlag (entityId: string) =
+    let id = entityId.ToLowerInvariant()
+    id.StartsWith "binary_sensor." && statusHints |> List.exists id.Contains
+
 /// Threshold for a specific entity: sun-driven sensors get night-time slack.
 let thresholdForEntity (entityId: string) (cadence: Cadence) : TimeSpan option =
     thresholdFor cadence
@@ -106,6 +123,9 @@ let thresholdForEntity (entityId: string) (cadence: Cadence) : TimeSpan option =
 let watchFor (entityId: string) (cadence: Cadence) (currentState: string) : Watch option =
     match currentState with
     | "unavailable" | "unknown" | null -> None
+    | _ when isStatusFlag entityId ->
+        // Not changing is the HEALTHY state for a status flag.
+        Some Liveness
     | _ ->
         match thresholdForEntity entityId cadence with
         | Some t -> Some (Staleness t)
