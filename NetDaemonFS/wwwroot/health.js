@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 32;
+const HEALTH_JS_VERSION = 33;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -504,8 +504,17 @@ function renderDiagram() {
     }
     // Wireless links take the child's SSID colour; wired/powerline stay dashed grey.
     const wireless = e.kind === 'network' && nb.link;
-    const stroke = wireless ? ' style="stroke:' + (LINK_COLOR[nb.link] || '#94a3b8') + '"' : '';
-    const cls = 'e-' + e.kind + (e.user ? ' e-user' : '') + (wireless ? ' e-wireless' : '');
+    // A line carrying nothing is drawn dead: the parent is off/unpowered, or a
+    // transfer switch is not selecting this feed.
+    const parentOff = na.position === 'off' || na.powered === false || na.outputOn === false;
+    const childOff  = nb.position === 'off' || nb.powered === false;
+    // The note tells us a transfer switch is not selecting this feed.
+    const notSelected = (e.note || '').indexOf('not selected') >= 0 || (e.note || '') === 'off';
+    const dead = e.kind === 'power' && (parentOff || childOff || notSelected);
+    const stroke = dead ? ''
+                 : wireless ? ' style="stroke:' + (LINK_COLOR[nb.link] || '#94a3b8') + '"' : '';
+    const cls = 'e-' + e.kind + (e.user ? ' e-user' : '') +
+                (wireless && !dead ? ' e-wireless' : '') + (dead ? ' e-dead' : '');
     return '<path class="' + cls + '" data-child="' + e.child + '" data-parent="' + e.parent +
            '" data-i="' + i + '" data-dir="' + (vertical ? 'v' : 'h') + '"' + stroke +
            ' d="M' + x1 + ',' + y1 +

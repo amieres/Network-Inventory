@@ -570,6 +570,8 @@
     .e-network.e-wireless { stroke-dasharray: none; }
     .e-bt-host { stroke: #c084fc; stroke-width: 1.4; fill: none; stroke-dasharray: 2 3; }
     .e-host    { stroke: #94a3b8; stroke-width: 1.4; fill: none; }
+    /* A line carrying no power reads as dead, not live orange. */
+    .e-dead    { stroke: #3f4250 !important; stroke-width: 1 !important; stroke-dasharray: 3 4 !important; }
     .e-user    { stroke-dasharray: 1 3; cursor: pointer; }
     .e-user:hover { stroke-width: 3; }
     /* Area grouping rectangles */
@@ -658,7 +660,7 @@
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v102 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v103 · js <span id="js-version">?</span></span></h1>
   <span class="view-tabs">
     <button class="view-tab active" data-view="inventory">Inventory</button>
     <button class="view-tab"        data-view="health">Health</button>
@@ -722,7 +724,7 @@
     <span style="color:#38bdf8">ABEWNETG</span>
     <span style="color:#22d3ee">ABEWNETG-5G</span>
     <span style="color:#fbbf24">ABEWNETG-GAR</span> ·
-    dashed grey = wired/powerline &middot; layout autosaves; <code>healthRestore()</code> undoes a reset, <code>healthExportLayout()</code> saves a copy
+    dashed grey = wired/powerline &middot; faint grey power line = not carrying power &middot; layout autosaves; <code>healthRestore()</code> undoes a reset, <code>healthExportLayout()</code> saves a copy
   </div>
   <div id="node-editor" hidden>
     <div class="ed-bg"></div>
@@ -813,6 +815,6 @@
 <div id="ctx-menu" hidden></div>
 
 <script src="app.js?v=89"></script>
-<script src="health.js?v=32"></script>
+<script src="health.js?v=33"></script>
 </body>
 </html>

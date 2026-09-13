@@ -358,13 +358,21 @@ module Topology =
                 yield! [ emit (Some "240V leg 1") n.powerFrom
                          emit (Some "240V leg 2") n.altFrom ] |> List.choose id
             | Selected ->
-                let activeSource =
+                // Draw BOTH feeds of a transfer switch and mark which one is
+                // live. Emitting only the selected feed made an Off switch look
+                // disconnected, hiding what it could be switched back to.
+                let liveNote, deadNote =
                     match n.position with
-                    | PosOff       -> PowerUnknown
-                    | PosLine      -> n.altFrom
-                    | PosGenerator -> n.powerFrom
-                    | _            -> n.powerFrom
-                yield! [ emit None activeSource ] |> List.choose id
+                    | PosLine      -> Some "line (live)", Some "generator (not selected)"
+                    | PosOff       -> None, Some "off"
+                    | _            -> Some "generator (live)", Some "line (not selected)"
+                match n.position with
+                | PosLine ->
+                    yield! [ emit liveNote n.altFrom; emit deadNote n.powerFrom ] |> List.choose id
+                | PosOff ->
+                    yield! [ emit deadNote n.powerFrom; emit deadNote n.altFrom ] |> List.choose id
+                | _ ->
+                    yield! [ emit liveNote n.powerFrom; emit deadNote n.altFrom ] |> List.choose id
             match n.lan with
             | Wired src   -> yield { child = n.key; parent = src; kind = Network; note = Some "wired" }
             | Powerline a -> ()     // wired access via the area; no line
