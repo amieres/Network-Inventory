@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 15;
+const HEALTH_JS_VERSION = 16;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -537,7 +537,8 @@ function openNodeEditor(key) {
     '<label>LAN access<select id="ed-lan">' +
       '<option value="none"' + (lanKind === 'none' ? ' selected' : '') + '>none (not a smart device)</option>' +
       '<option value="powerline"' + (lanKind === 'powerline' ? ' selected' : '') + '>powerline (via the area)</option>' +
-      deviceKeys.map(function (k) {
+      // Only access points / routers can be a wired source.
+      (topoData.wiredSources || deviceKeys).map(function (k) {
         return '<option value="wired:' + esc(k) + '"' +
                (lanKind === 'wired' && lanVal === k ? ' selected' : '') +
                '>wired from ' + esc(k) + '</option>';

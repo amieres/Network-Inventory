@@ -194,7 +194,8 @@ let loadCustomNodes (conn: SqliteConnection) : Node list * Set<string> =
                   link = (match readOpt r 7 |> Option.bind parseLan with Some (Wifi s) -> Some s | _ -> None)
                   size = r.GetInt32 8
                   powerFrom = (readOpt r 6 |> Option.bind parsePower |> Option.defaultValue PowerUnknown)
-                  lan       = (readOpt r 7 |> Option.bind parseLan   |> Option.defaultValue NoLan) }
+                  lan       = (readOpt r 7 |> Option.bind parseLan   |> Option.defaultValue NoLan)
+                  btHost = None; needsInternet = false }
     List.ofSeq added, Set.ofSeq dead
 
 let addCustomNode (conn: SqliteConnection)

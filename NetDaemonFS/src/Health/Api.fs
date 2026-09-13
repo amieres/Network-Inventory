@@ -244,6 +244,13 @@ let private getTopology (svc: HealthService) : HttpHandler =
                            // offer them instead of requiring free text.
                            links = liveNodes |> List.choose (fun n -> n.link) |> List.distinct |> List.sort
                            kinds = liveNodes |> List.map (fun n -> n.kind) |> List.distinct |> List.sort
+                           // Only infrastructure can be a WIRED source - offering
+                           // every device made the list unusable.
+                           wiredSources =
+                             liveNodes
+                             |> List.filter (fun n -> [ "ap"; "modem"; "switch"; "internet" ] |> List.contains n.kind)
+                             |> List.map (fun n -> n.key)
+                             |> List.sort
                            knownAreas = liveNodes |> List.choose (fun n -> n.area) |> List.distinct |> List.sort |} ctx
 
 // ── Editing ──────────────────────────────────────────────────────────────────

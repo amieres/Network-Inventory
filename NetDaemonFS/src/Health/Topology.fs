@@ -62,6 +62,13 @@ type Node = {
     /// means the device has no network at all (a dumb appliance), which is why
     /// it can never be diagnosed by reachability.
     lan      : LanKind
+    /// The BLE gateway this node is seen through, when it is only reachable over
+    /// Bluetooth. Losing the gateway silences the device while the device itself
+    /// is fine - blame the gateway, not the three healthy Bluettis.
+    btHost   : string option
+    /// Needs working internet (not just LAN) to function - cloud cameras, remote
+    /// access. Brand-dependent, so it is declared per device.
+    needsInternet : bool
 }
 
 /// Power can come from a specific device (grid, plug, power station, circuit,
@@ -113,7 +120,8 @@ module Topology =
           device = None; entity = None; area = None
           blindSpot = false; remedy = None
           outputEntity = None; link = None; size = 2
-          powerFrom = PowerUnknown; lan = NoLan }
+          powerFrom = PowerUnknown; lan = NoLan
+          btHost = None; needsInternet = false }
 
     let nodes : Node list = [
         // ── Power sources ────────────────────────────────────────────────────
@@ -137,17 +145,20 @@ module Topology =
                   device = Some "BLUETTI AC500 #1"; entity = Some "binary_sensor.ac500_connected"
                   outputEntity = Some "sensor.ac500_ac_output_power"
                   area = Some "Garage"; link = Some "ABEWNETG"; size = 3
-                  powerFrom = FromDevice "grid"; lan = Wifi "ABEWNETG" }
+                  powerFrom = FromDevice "grid"; lan = Wifi "ABEWNETG"
+                  btHost = Some "raspi4" }
         yield { node "ac500_2" "BLUETTI AC500 #2" "battery" with
                   device = Some "BLUETTI AC500 #2"; entity = Some "binary_sensor.ac500_connected_2"
                   outputEntity = Some "sensor.ac500_ac_output_power_2"
                   area = Some "Garage"; link = Some "ABEWNETG"; size = 3
-                  powerFrom = PowerUnknown; lan = Wifi "ABEWNETG" }
+                  powerFrom = PowerUnknown; lan = Wifi "ABEWNETG"
+                  btHost = Some "raspi4" }
         yield { node "ac200m" "BLUETTI AC200M" "battery" with
                   device = Some "BLUETTI AC200M"; entity = Some "binary_sensor.ac200m_connected"
                   outputEntity = Some "sensor.ac200m_ac_output_power"
                   area = Some "Garage"; size = 3
-                  powerFrom = PowerUnknown; lan = NoLan }
+                  powerFrom = PowerUnknown; lan = NoLan
+                  btHost = Some "raspi4" }
 
         // ── Manual transfer switch circuits ──────────────────────────────────
         // A C E G H default to AC500 #1, B D F I to AC500 #2 - but every circuit
@@ -161,7 +172,10 @@ module Topology =
                 blindSpot = (c = "D")
                 remedy    = if c = "D"
                             then Some "Switch circuit D to LINE on the manual transfer switch - restores WiFi, LAN and internet"
-                            else Some "Switchable to LINE (grid) on the manual transfer switch" }
+                            else Some "Switchable to LINE (grid) on the manual transfer switch"
+                // Default feed: A C E G H from AC500 #1, B D F I from AC500 #2.
+                // Every circuit is manually switchable to LINE (the grid).
+                powerFrom = FromDevice (if "ACEGH".Contains c then "ac500_1" else "ac500_2") }
 
         // ── Smart plugs ─────────────────────────────────────────────────────
         // Plugs gate their dependants: `outputEntity` is the switch state, so a
@@ -190,7 +204,8 @@ module Topology =
         yield { node "homeassistant" "Home Assistant" "host" with
                   device = Some "AbeHomeAssistant"; blindSpot = true; size = 3
                   remedy = Some "If HA is unreachable, suspect circuit D - switch it to LINE"
-                  powerFrom = FromDevice "circuit_d"; lan = Wired "nighthawk" }
+                  powerFrom = FromArea "Game Room"; lan = Wired "nighthawk"
+                  area = Some "Game Room" }
 
         // ── Mains-only devices (no battery backup) ───────────────────────────
         yield { node "abevue2" "AbeVue2 (energy monitor)" "sensor" with
@@ -211,7 +226,8 @@ module Topology =
                   powerFrom = FromDevice "shelly_us"; lan = Wifi "ABEWNETG" }
         yield { node "cam_driveway" "CloudEdge Driveway" "camera" with
                   device = Some "CloudEdge Driveway"; area = Some "Driveway"; link = Some "ABEWNETG-GAR"
-                  powerFrom = FromArea "Driveway"; lan = Wifi "ABEWNETG-GAR" }
+                  powerFrom = FromArea "Driveway"; lan = Wifi "ABEWNETG-GAR"
+                  needsInternet = true }
         yield { node "garage_opener" "Garage Opener" "opener" with
                   device = Some "Garage Opener"; entity = Some "cover.garage_door"
                   area = Some "Garage"; link = Some "ABEWNETG"
@@ -231,19 +247,26 @@ module Topology =
         yield { node "internet" "Internet (WAN)" "internet" with
                   entity = Some "binary_sensor.internet_up"; size = 3
                   remedy = Some "WAN down: LAN and WiFi keep working; cloud cameras, remote access and app-dependent devices do not"
-                  powerFrom = PowerUnknown; lan = NoLan }
-        yield { node "modem" "Internet modem" "modem" with
+                  powerFrom = PowerUnknown; lan = Wired "modem" }
+        // Nokia ONT at 10.0.0.1 (management address, reachable by ping from the
+        // LAN). It is in BRIDGE mode - the eero holds the public IP directly
+        // (eero reports double_nat: false, wan_ip 139.94.2.161) - so the ONT
+        // routes nothing and serves no web UI: ports 80/443/8080/8443/22/23 are
+        // all closed.
+        yield { node "modem" "Nokia ONT (bridge, 10.0.0.1)" "modem" with
                   area = Some "Game Room"; size = 3
-                  powerFrom = FromDevice "circuit_d"; lan = Wired "internet" }
+                  powerFrom = FromArea "Game Room"; lan = NoLan }
         yield { node "eero" "eero" "ap" with
                   device = Some "eero"; link = Some "AbeEero"; size = 3
-                  powerFrom = FromDevice "circuit_d"; lan = Wired "modem" }
+                  powerFrom = FromArea "Game Room"; lan = Wired "modem"
+                  area = Some "Game Room" }
         yield { node "nighthawk" "NETGEAR Nighthawk RAX80" "ap" with
                   device = Some "NETGEAR RAX80"; link = Some "ABEWNETG"; size = 3
-                  powerFrom = FromDevice "circuit_d"; lan = Wired "eero" }
+                  powerFrom = FromArea "Game Room"; lan = Wired "eero"
+                  area = Some "Game Room" }
         yield { node "dbit" "DBit router" "ap" with
                   area = Some "Game Room"; link = Some "ABEWNETG-GAR"; size = 3
-                  powerFrom = FromDevice "circuit_d"; lan = Wired "eero" }
+                  powerFrom = FromArea "Game Room"; lan = Wired "eero" }
 
         // ── Areas as power consumers ────────────────────────────────────────
         // An area can itself be fed from a device, so everything in it inherits
@@ -257,81 +280,12 @@ module Topology =
                   powerFrom = FromDevice "grid" }
     ]
 
-    let edges : Edge list = [
-        // ── Power: transfer-switch circuits ─────────────────────────────────
-        // Every circuit is manually switchable to the grid (Line), so these are
-        // the DEFAULT source, not a hard wiring.
-        for c in [ "a"; "c"; "e"; "g"; "h" ] ->
-            { child = $"circuit_{c}"; parent = "ac500_1"; kind = Power; note = Some "manual transfer switch (switchable to Line)" }
-        for c in [ "b"; "d"; "f"; "i" ] ->
-            { child = $"circuit_{c}"; parent = "ac500_2"; kind = Power; note = Some "manual transfer switch (switchable to Line)" }
-
-        // ── Power: mains-only devices ───────────────────────────────────────
-        // No battery backup: they die in a utility outage and survive a Bluetti
-        // failure - the opposite of everything on the circuits.
-        yield { child = "abevue2";      parent = "grid"; kind = Power; note = Some "mains only - no battery backup" }
-        yield { child = "ev_charger";   parent = "grid"; kind = Power; note = Some "mains only - no battery backup" }
-        yield { child = "studio_esp32"; parent = "grid"; kind = Power; note = Some "mains only - no battery backup" }
-        // Only AC500 #1 takes an AC input from the grid.
-        yield { child = "ac500_1"; parent = "grid"; kind = Power; note = Some "AC input charges the pack" }
-
-        // ── Power: devices on plugs / battery outputs ───────────────────────
-        // Gated by AC500 #2's AC-output STATE: the unit can be healthy and
-        // pingable while its output is off, which kills Kauf_XX -> Pi 4 -> all
-        // Bluetti BLE data even though the AC500s still answer ping.
-        yield { child = "kauf_xx";       parent = "ac500_2";   kind = Power; note = Some "fed from AC500 #2 AC out (see its output state)" }
-        yield { child = "raspi4";        parent = "kauf_xx";   kind = Power; note = Some "bluetti-mqtt host" }
-        yield { child = "raspi_zero";    parent = "shelly_us"; kind = Power; note = Some "shared with Kasa garage camera" }
-        yield { child = "kasa_garage";   parent = "shelly_us"; kind = Power; note = Some "shared with Pi Zero" }
-        yield { child = "garage_opener"; parent = "ac500_2";   kind = Power; note = Some "on AC500 #2 output" }
-        yield { child = "midea_ac";      parent = "ac200m";    kind = Power; note = Some "cools the space the thermal camera measures" }
-
-        // ── Power: circuit D carries the whole network ──────────────────────
-        // Routers, the modem and the game room are all on D, so losing it takes
-        // WiFi, LAN, internet AND Home Assistant at once.
-        yield { child = "nighthawk";     parent = "circuit_d"; kind = Power; note = Some "Nighthawk on circuit D" }
-        yield { child = "eero";          parent = "circuit_d"; kind = Power; note = Some "eero on circuit D" }
-        yield { child = "dbit";          parent = "circuit_d"; kind = Power; note = Some "DBit on circuit D" }
-        yield { child = "modem";         parent = "circuit_d"; kind = Power; note = Some "internet modem on circuit D" }
-        yield { child = "homeassistant"; parent = "circuit_d"; kind = Power
-                note = Some "HA dies with circuit D - this monitor cannot report it" }
-
-        // ── Network: the wired backbone ─────────────────────────────────────
-        // modem --wired-- eero --wired-- Nighthawk
-        //                  \--wired-- DBit (Game Room)
-        // Nighthawk --wired-- Mac, Home Assistant
-        yield { child = "internet";      parent = "modem";     kind = Network; note = Some "WAN service" }
-        yield { child = "eero";          parent = "modem";     kind = Network; note = Some "wired" }
-        yield { child = "nighthawk";     parent = "eero";      kind = Network; note = Some "wired" }
-        yield { child = "dbit";          parent = "eero";      kind = Network; note = Some "wired" }
-        yield { child = "mac_studio";    parent = "nighthawk"; kind = Network; note = Some "wired (also has WiFi)" }
-        yield { child = "homeassistant"; parent = "nighthawk"; kind = Network; note = Some "wired" }
-
-        // ── Network: wireless clients ───────────────────────────────────────
-        yield { child = "raspi_zero";    parent = "dbit";      kind = Network; note = Some "ABEWNETG-GAR" }
-        yield { child = "cam_driveway";  parent = "dbit";      kind = Network; note = Some "ABEWNETG-GAR" }
-        yield { child = "kauf_xx";       parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
-        yield { child = "shelly_us";     parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
-        yield { child = "raspi4";        parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
-        yield { child = "garage_opener"; parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
-        yield { child = "kasa_garage";   parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
-        yield { child = "abevue2";       parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
-        yield { child = "ev_charger";    parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
-        yield { child = "studio_esp32";  parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
-        yield { child = "ac500_1";       parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
-        yield { child = "ac500_2";       parent = "nighthawk"; kind = Network; note = Some "ABEWNETG" }
-
-        // Cloud cameras need INTERNET, not just LAN - losing the modem drops them
-        // even though WiFi still works. (Which cameras is brand-dependent; TODO.)
-        yield { child = "cam_driveway"; parent = "internet"; kind = Network; note = Some "cloud camera needs internet" }
-
-        // ── BLE ─────────────────────────────────────────────────────────────
-        // The Pi 4 is the Bluetti BLE gateway: when it wedges, all three stop
-        // reporting while the power stations themselves are fine.
-        yield { child = "ac500_1"; parent = "raspi4"; kind = BtHost; note = Some "bluetti-mqtt" }
-        yield { child = "ac500_2"; parent = "raspi4"; kind = BtHost; note = Some "bluetti-mqtt" }
-        yield { child = "ac200m";  parent = "raspi4"; kind = BtHost; note = Some "bluetti-mqtt" }
-    ]
+    /// No hardcoded edges. Every relationship is a PROPERTY of a node -
+    /// powerFrom, lan, btHost, needsInternet - so each one has a reason
+    /// attached, can be edited in the dashboard, and cannot silently duplicate
+    /// a derived edge. The circuits are the one structural exception: their
+    /// default Bluetti feed is expressed as each circuit's own powerFrom.
+    let edges : Edge list = []
 
     /// Edges implied by each node's own powerFrom / lan fields, so the two are
     /// never out of sync. Area-sourced power and wifi produce NO line: the area
@@ -348,6 +302,11 @@ module Topology =
             | Powerline a -> ()     // wired access via the area; no line
             | Wifi _      -> ()     // shown by the radio icon
             | NoLan       -> ()
+            match n.btHost with
+            | Some h -> yield { child = n.key; parent = h; kind = BtHost; note = Some "BLE gateway" }
+            | None   -> ()
+            if n.needsInternet then
+                yield { child = n.key; parent = "internet"; kind = Network; note = Some "needs internet" }
     ]
 
     let nodeByKey = nodes |> List.map (fun n -> n.key, n) |> Map.ofList
