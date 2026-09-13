@@ -305,20 +305,55 @@ type HealthService
     member _.IsReady = lastLearn > DateTimeOffset.MinValue
 
     /// Seed topology with stored user edits layered on top.
-    member _.GetNodes() : Node list =
+    member this.GetNodes() : Node list =
         try
             use c = openDb ()
             let ov = Store.loadOverrides c
-            Topology.nodes |> List.map (Store.applyOverrides ov)
+            let custom, deleted = Store.loadCustomNodes c
+            (Topology.nodes @ custom)
+            |> List.filter (fun n -> not (deleted.Contains n.key))
+            |> List.map (Store.applyOverrides ov)
         with ex ->
             log.LogWarning(ex, "Health: could not load topology overrides")
             Topology.nodes
 
-    member _.GetEdges() : Edge list =
+    member this.GetEdges() : Edge list =
+        // Edges implied by each node's powerFrom/lan, plus the hand-drawn ones.
+        // Derived first so the two can never disagree.
+        let ns = this.GetNodes()
+        let live = ns |> List.map (fun n -> n.key) |> Set.ofList
+        let all =
+            try
+                use c = openDb ()
+                Topology.edges @ Topology.derivedEdges ns @ Store.loadUserEdges c
+            with _ -> Topology.edges @ Topology.derivedEdges ns
+        // Drop edges pointing at nodes that no longer exist.
+        all
+        |> List.filter (fun e -> live.Contains e.child && live.Contains e.parent)
+        |> List.distinctBy (fun e -> e.child, e.parent, e.kind)
+
+    /// Current IP per inventory device name, for the wifi/wired tooltips.
+    member _.GetDeviceIps() : Map<string, string> =
         try
             use c = openDb ()
-            Topology.edges @ Store.loadUserEdges c
-        with _ -> Topology.edges
+            use cmd = c.CreateCommand()
+            cmd.CommandText <-
+                "SELECT d.name, i.ip FROM devices d JOIN device_ips i ON i.device_id = d.id                  WHERE i.is_current = 1 AND d.name IS NOT NULL"
+            use r = cmd.ExecuteReader()
+            let acc = ResizeArray()
+            while r.Read() do acc.Add(r.GetString 0, r.GetString 1)
+            acc |> Seq.distinctBy fst |> Map.ofSeq
+        with _ -> Map.empty
+
+    member _.AddNode(key, label, kind, area, device, entity, powerFrom, lan, size) =
+        use c = openDb ()
+        Store.migrate c
+        Store.addCustomNode c key label kind area device entity powerFrom lan size
+
+    member _.DeleteNode(key) =
+        use c = openDb ()
+        Store.migrate c
+        Store.deleteNode c key
 
     member _.GetPositions() =
         try use c = openDb () in Store.loadPositions c

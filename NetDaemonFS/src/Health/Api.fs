@@ -127,6 +127,8 @@ let private getTopology (svc: HealthService) : HttpHandler =
 
         // Raw entity states, for output/link indicators.
         let entRaw = svc.GetRawStates()
+        // Current IPs from the inventory, shown in the wifi/wired tooltips.
+        let deviceIps = svc.GetDeviceIps()
 
         // A node has no power when an ancestor power-edge parent is faulted, or
         // when the plug/station feeding it reports its output off.
@@ -175,6 +177,10 @@ let private getTopology (svc: HealthService) : HttpHandler =
                    remedy    = n.remedy
                    size      = n.size
                    link      = n.link
+                   powerFrom = n.powerFrom.label
+                   lan       = n.lan.label
+                   // Tooltip for the radio / wired icon.
+                   ip        = n.device |> Option.bind (fun d -> deviceIps |> Map.tryFind d)
                    // Output state: a station or plug can be healthy while its
                    // output is switched OFF, which is a different failure from
                    // the device itself being down.
@@ -245,6 +251,8 @@ type OverrideDto = {
     size    : Nullable<int>
     acInput : Nullable<bool>
     kind    : string
+    powerFrom : string
+    lan       : string
 }
 
 let private saveNode (svc: HealthService) : HttpHandler =
@@ -261,7 +269,9 @@ let private saveNode (svc: HealthService) : HttpHandler =
                   link    = opt dto.link
                   size    = Option.ofNullable dto.size
                   acInput = Option.ofNullable dto.acInput
-                  kind    = opt dto.kind }
+                  kind    = opt dto.kind
+                  powerFrom = opt dto.powerFrom
+                  lan       = opt dto.lan }
             return! Response.ofJson {| ok = true |} ctx
     }
 
@@ -285,6 +295,44 @@ let private deleteEdge (svc: HealthService) : HttpHandler =
 [<CLIMutable>]
 type PosDto = { key : string; x : float; y : float }
 
+[<CLIMutable>]
+type NewNodeDto = {
+    key       : string
+    label     : string
+    kind      : string
+    area      : string
+    device    : string
+    entity    : string
+    powerFrom : string
+    lan       : string
+    size      : Nullable<int>
+}
+
+let private addNode (svc: HealthService) : HttpHandler =
+    fun ctx -> task {
+        let! dto = Request.getJson<NewNodeDto> ctx
+        let opt (v: string) = if String.IsNullOrWhiteSpace v then None else Some v
+        if String.IsNullOrWhiteSpace dto.key || String.IsNullOrWhiteSpace dto.label then
+            return! (Response.withStatusCode 400 >> Response.ofJson {| error = "key and label required" |}) ctx
+        else
+            svc.AddNode(dto.key, dto.label,
+                        (if String.IsNullOrWhiteSpace dto.kind then "device" else dto.kind),
+                        opt dto.area, opt dto.device, opt dto.entity,
+                        opt dto.powerFrom, opt dto.lan,
+                        (if dto.size.HasValue then dto.size.Value else 2))
+            return! Response.ofJson {| ok = true |} ctx
+    }
+
+[<CLIMutable>]
+type KeyDto = { key : string }
+
+let private deleteNode (svc: HealthService) : HttpHandler =
+    fun ctx -> task {
+        let! dto = Request.getJson<KeyDto> ctx
+        svc.DeleteNode dto.key
+        return! Response.ofJson {| ok = true |} ctx
+    }
+
 let private savePositions (svc: HealthService) : HttpHandler =
     fun ctx -> task {
         let! ps = Request.getJson<PosDto[]> ctx
@@ -302,4 +350,6 @@ let routes (svc: HealthService) : HttpEndpoint list = [
     post "/api/health/edge"      (addEdge       svc)
     post "/api/health/edge/del"  (deleteEdge    svc)
     post "/api/health/positions" (savePositions svc)
+    post "/api/health/node/new"  (addNode       svc)
+    post "/api/health/node/del"  (deleteNode    svc)
 ]

@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 13;
+const HEALTH_JS_VERSION = 14;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -265,14 +265,32 @@ function iconFor(kind, x, y, dim) {
   }
 }
 
-// WiFi arc tinted by SSID; grey when the radio is down.
-function linkIcon(link, x, y, up) {
-  if (!link) return '';
-  const c = up ? (LINK_COLOR[link] || '#94a3b8') : '#475569';
-  return '<g transform="translate(' + x + ',' + y + ')" fill="none" stroke="' + c +
-         '" stroke-width="1.4" stroke-linecap="round">' +
-         '<path d="M0 4a6 6 0 0 1 8 0"/><path d="M2 6.2a3 3 0 0 1 4 0"/>' +
-         '<circle cx="4" cy="8.4" r=".8" fill="' + c + '" stroke="none"/></g>';
+// Radio / wired indicator. WiFi is an arc tinted by SSID; wired is a plug-and-
+// cable glyph; powerline is wired-via-the-area. Greyed when the link is down.
+// The tooltip carries the device's current IP, pulled from the inventory.
+function linkIcon(n, x, y, up) {
+  const lan = n.lan || '';
+  if (!lan || lan === 'none') return '';          // not a smart device at all
+  const wifi = lan.indexOf('wifi:') === 0;
+  const ssid = wifi ? lan.slice(5) : null;
+  const c = !up ? '#475569' : (wifi ? (LINK_COLOR[ssid] || '#94a3b8') : '#94a3b8');
+
+  const tip = (wifi ? 'WiFi: ' + ssid
+              : lan.indexOf('powerline:') === 0 ? 'Wired via powerline (' + lan.slice(10) + ')'
+              : lan.indexOf('wired:') === 0 ? 'Wired from ' + lan.slice(6)
+              : lan) + (n.ip ? ' — ' + n.ip : '');
+
+  const glyph = wifi
+    ? '<path d="M0 4a6 6 0 0 1 8 0"/><path d="M2 6.2a3 3 0 0 1 4 0"/>' +
+      '<circle cx="4" cy="8.4" r=".8" fill="' + c + '" stroke="none"/>'
+    // Wired: a socket with a cable running out of it.
+    : '<rect x="0" y="2" width="5" height="5" rx="1"/>' +
+      '<path d="M5 4.5h2.5a2 2 0 0 1 2 2V9"/>' +
+      '<circle cx="9.5" cy="9.6" r=".9" fill="' + c + '" stroke="none"/>';
+
+  return '<g class="lan-icon" transform="translate(' + x + ',' + y + ')" fill="none" stroke="' + c +
+         '" stroke-width="1.4" stroke-linecap="round"><title>' + esc(tip) + '</title>' +
+         glyph + '</g>';
 }
 
 function renderDiagram() {
@@ -401,7 +419,7 @@ function renderDiagram() {
       '<text class="n-label' + (noPower ? ' dim' : '') + '" x="' + (p.x + 23) + '" y="' + (p.y + (n.size === 1 ? 17 : 14)) + '">' + esc(label) + '</text>' +
       (n.size === 1 ? '' :
         '<text class="n-kind" x="' + (p.x + 23) + '" y="' + (p.y + 26) + '">' + esc(n.kind) + '</text>') +
-      linkIcon(n.link, p.x + w - 22, p.y + 4, n.radioUp !== false) +
+      linkIcon(n, p.x + w - 22, p.y + 4, n.radioUp !== false) +
       outPip + blind + '</g>';
   }
 
@@ -419,6 +437,7 @@ function renderDiagram() {
       '<span class="lyr-sep"></span>' +
       layerBtn('power', '⚡ power') + layerBtn('network', '📶 wifi/wired') + layerBtn('bt-host', 'ᛒ bluetooth') +
       '<span class="lyr-sep"></span>' +
+      '<button id="btn-add-node" title="Add a device to the diagram">+ device</button>' +
       '<button id="btn-connect" class="' + (connectFrom ? 'on' : '') + '" ' +
         'title="Click this, then click two nodes to connect them">+ connection</button>' +
       '<span class="diag-hint">' +
@@ -453,6 +472,15 @@ function openNodeEditor(key) {
   });
   const areas = (topoData.knownAreas || []).slice();
   const kinds = (topoData.kinds || []).slice();
+  const deviceKeys = (topoData.nodes || []).map(function (x) { return x.key; }).sort();
+
+  // Split the stored "kind:value" strings so the selects can be pre-filled.
+  const pf = n.powerFrom || '';
+  const pfKind = pf.indexOf(':') > 0 ? pf.split(':')[0] : '';
+  const pfVal  = pf.indexOf(':') > 0 ? pf.slice(pf.indexOf(':') + 1) : '';
+  const lanS = n.lan || 'none';
+  const lanKind = lanS.indexOf(':') > 0 ? lanS.split(':')[0] : lanS;
+  const lanVal  = lanS.indexOf(':') > 0 ? lanS.slice(lanS.indexOf(':') + 1) : '';
 
   const opts = function (list, cur, blankLabel) {
     return '<option value="">' + blankLabel + '</option>' +
@@ -465,7 +493,26 @@ function openNodeEditor(key) {
     '<label>Name<input id="ed-label" value="' + esc(n.label) + '"></label>' +
     '<label>Area<select id="ed-area">' + opts(areas, n.area, '(none)') + '</select>' +
       '<input id="ed-area-new" placeholder="or type a new area"></label>' +
-    '<label>WiFi SSID / link<select id="ed-link">' + opts(links, n.link, '(wired / none)') + '</select></label>' +
+    // Power source: a device, or simply the area (which draws no line).
+    '<label>Power from<select id="ed-power-kind">' +
+      '<option value=""' + (!n.powerFrom ? ' selected' : '') + '>(unknown)</option>' +
+      '<option value="area"' + (pfKind === 'area' ? ' selected' : '') + '>the area</option>' +
+      '<option value="device"' + (pfKind === 'device' ? ' selected' : '') + '>another device</option>' +
+      '</select>' +
+      '<select id="ed-power-val">' + opts(deviceKeys, pfVal, '(choose)') + '</select>' +
+      '<select id="ed-power-area">' + opts(areas, pfVal, '(choose area)') + '</select>' +
+      '</label>' +
+    // LAN: none <> wired. none means the device is not smart at all.
+    '<label>LAN access<select id="ed-lan-kind">' +
+      '<option value="none"' + (lanKind === 'none' ? ' selected' : '') + '>none (not a smart device)</option>' +
+      '<option value="wifi"' + (lanKind === 'wifi' ? ' selected' : '') + '>WiFi</option>' +
+      '<option value="wired"' + (lanKind === 'wired' ? ' selected' : '') + '>wired</option>' +
+      '<option value="powerline"' + (lanKind === 'powerline' ? ' selected' : '') + '>powerline (via area)</option>' +
+      '</select>' +
+      '<select id="ed-lan-ssid">' + opts(links, lanVal, '(choose SSID)') + '</select>' +
+      '<select id="ed-lan-src">' + opts(deviceKeys, lanVal, '(choose source)') + '</select>' +
+      '<select id="ed-lan-area">' + opts(areas, lanVal, '(choose area)') + '</select>' +
+      '</label>' +
     '<label>Type<select id="ed-kind">' + opts(kinds, n.kind, '(unchanged)') + '</select></label>' +
     '<label>Box size<select id="ed-size">' +
       '<option value="1"' + (n.size === 1 ? ' selected' : '') + '>small</option>' +
@@ -479,6 +526,40 @@ function openNodeEditor(key) {
 
   document.getElementById('node-editor-title').textContent = 'Edit ' + n.label;
   document.getElementById('node-editor').hidden = false;
+
+  function syncEditorSelects() {
+    const pk = document.getElementById('ed-power-kind').value;
+    document.getElementById('ed-power-val').style.display  = pk === 'device' ? '' : 'none';
+    document.getElementById('ed-power-area').style.display = pk === 'area'   ? '' : 'none';
+    const lk = document.getElementById('ed-lan-kind').value;
+    document.getElementById('ed-lan-ssid').style.display = lk === 'wifi'      ? '' : 'none';
+    document.getElementById('ed-lan-src').style.display  = lk === 'wired'     ? '' : 'none';
+    document.getElementById('ed-lan-area').style.display = lk === 'powerline' ? '' : 'none';
+  }
+  document.getElementById('ed-power-kind').addEventListener('change', syncEditorSelects);
+  document.getElementById('ed-lan-kind').addEventListener('change', syncEditorSelects);
+  syncEditorSelects();
+}
+
+async function deleteCurrentNode() {
+  if (!editingKey) return;
+  if (!confirm('Remove this device from the diagram?')) return;
+  try {
+    await api('POST', '/api/health/node/del', { key: editingKey });
+    closeNodeEditor();
+    await loadHealth();
+  } catch (e) { alert('Delete failed: ' + e.message); }
+}
+
+async function addNewDevice() {
+  const label = prompt('Name of the new device');
+  if (!label) return;
+  const key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  try {
+    await api('POST', '/api/health/node/new', { key: key, label: label, kind: 'device', size: 2 });
+    await loadHealth();
+    openNodeEditor(key);      // straight into the editor to fill in the details
+  } catch (e) { alert('Could not add device: ' + e.message); }
 }
 
 function closeNodeEditor() {
@@ -489,14 +570,26 @@ function closeNodeEditor() {
 async function saveNodeEditor() {
   if (!editingKey) return;
   const newArea = document.getElementById('ed-area-new').value.trim();
+  const pk = document.getElementById('ed-power-kind').value;
+  const powerFrom = pk === 'device' ? 'device:' + document.getElementById('ed-power-val').value
+                  : pk === 'area'   ? 'area:'   + document.getElementById('ed-power-area').value
+                  : '';
+  const lk = document.getElementById('ed-lan-kind').value;
+  const lan = lk === 'wifi'      ? 'wifi:'      + document.getElementById('ed-lan-ssid').value
+            : lk === 'wired'     ? 'wired:'     + document.getElementById('ed-lan-src').value
+            : lk === 'powerline' ? 'powerline:' + document.getElementById('ed-lan-area').value
+            : 'none';
+
   const body = {
     nodeKey: editingKey,
     label:   document.getElementById('ed-label').value.trim(),
     area:    newArea || document.getElementById('ed-area').value,
-    link:    document.getElementById('ed-link').value,
+    link:    lk === 'wifi' ? document.getElementById('ed-lan-ssid').value : '',
     kind:    document.getElementById('ed-kind').value || null,
     size:    parseInt(document.getElementById('ed-size').value, 10),
-    acInput: document.getElementById('ed-ac').checked
+    acInput: document.getElementById('ed-ac').checked,
+    powerFrom: powerFrom,
+    lan:       lan
   };
   try {
     await api('POST', '/api/health/node', body);
@@ -537,6 +630,9 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H) {
       renderDiagram();
     });
   });
+
+  const abtn = document.getElementById('btn-add-node');
+  if (abtn) abtn.addEventListener('click', addNewDevice);
 
   const cbtn = document.getElementById('btn-connect');
   if (cbtn) cbtn.addEventListener('click', function () {
@@ -695,6 +791,8 @@ document.querySelectorAll('.view-tab').forEach(function (b) {
 });
 const edSave = document.getElementById('ed-save');
 if (edSave) edSave.addEventListener('click', saveNodeEditor);
+const edDel = document.getElementById('ed-delete');
+if (edDel) edDel.addEventListener('click', deleteCurrentNode);
 const edBg = document.querySelector('#node-editor .ed-bg');
 if (edBg) edBg.addEventListener('click', closeNodeEditor);
 

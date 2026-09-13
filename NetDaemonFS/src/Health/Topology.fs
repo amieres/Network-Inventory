@@ -55,7 +55,44 @@ type Node = {
     /// Relative box size on the diagram: 1 = small, 2 = normal, 3 = large.
     /// Grid-snapped in the UI.
     size     : int
+    /// Where this node's power comes from. `FromArea` draws no line - the area
+    /// rectangle already encloses the node, so a line to it is pure clutter.
+    powerFrom : PowerSource
+    /// How this node reaches the LAN. `NoLan` is NOT the same as `Wired`: it
+    /// means the device has no network at all (a dumb appliance), which is why
+    /// it can never be diagnosed by reachability.
+    lan      : LanKind
 }
+
+/// Power can come from a specific device (grid, plug, power station, circuit,
+/// anything) or simply from the area the node sits in - a wall socket on that
+/// area's circuit. Area-sourced power draws no line.
+and PowerSource =
+    | FromDevice of key : string
+    | FromArea   of area : string
+    | PowerUnknown
+    with
+        member this.label =
+            match this with
+            | FromDevice k -> "device:" + k
+            | FromArea a   -> "area:" + a
+            | PowerUnknown -> ""
+
+/// `NoLan` <> `Wired`: no LAN at all means the device is not smart and cannot be
+/// reached or diagnosed over the network. Powerline is wired access obtained
+/// *from the area* rather than from a named switch/router.
+and LanKind =
+    | Wifi      of ssid : string
+    | Wired     of source : string      // node key of the switch/router/AP
+    | Powerline of area : string        // wired access via the area's powerline
+    | NoLan
+    with
+        member this.label =
+            match this with
+            | Wifi s      -> "wifi:" + s
+            | Wired src   -> "wired:" + src
+            | Powerline a -> "powerline:" + a
+            | NoLan       -> "none"
 
 type Edge = {
     child  : string      // Node.key
@@ -75,7 +112,8 @@ module Topology =
         { key = key; label = label; kind = kind
           device = None; entity = None; area = None
           blindSpot = false; remedy = None
-          outputEntity = None; link = None; size = 2 }
+          outputEntity = None; link = None; size = 2
+          powerFrom = PowerUnknown; lan = NoLan }
 
     let nodes : Node list = [
         // ── Power sources ────────────────────────────────────────────────────
@@ -87,7 +125,8 @@ module Topology =
         // when mains returned on 2026-08-25.
         yield { node "grid" "Utility grid (mains)" "grid" with
                   entity = Some "sensor.total_ac_input_power"; size = 3
-                  remedy = Some "Utility outage: battery-backed circuits keep running; mains-only devices are down until power returns" }
+                  remedy = Some "Utility outage: battery-backed circuits keep running; mains-only devices are down until power returns"
+                  powerFrom = PowerUnknown; lan = NoLan }
 
         // Only AC500 #1 takes an AC input from the grid. AC500 #2 and the AC200M
         // are NOT grid-connected.
@@ -97,15 +136,18 @@ module Topology =
         yield { node "ac500_1" "BLUETTI AC500 #1" "battery" with
                   device = Some "BLUETTI AC500 #1"; entity = Some "binary_sensor.ac500_connected"
                   outputEntity = Some "sensor.ac500_ac_output_power"
-                  area = Some "Garage"; link = Some "ABEWNETG"; size = 3 }
+                  area = Some "Garage"; link = Some "ABEWNETG"; size = 3
+                  powerFrom = FromDevice "grid"; lan = Wifi "ABEWNETG" }
         yield { node "ac500_2" "BLUETTI AC500 #2" "battery" with
                   device = Some "BLUETTI AC500 #2"; entity = Some "binary_sensor.ac500_connected_2"
                   outputEntity = Some "sensor.ac500_ac_output_power_2"
-                  area = Some "Garage"; link = Some "ABEWNETG"; size = 3 }
+                  area = Some "Garage"; link = Some "ABEWNETG"; size = 3
+                  powerFrom = PowerUnknown; lan = Wifi "ABEWNETG" }
         yield { node "ac200m" "BLUETTI AC200M" "battery" with
                   device = Some "BLUETTI AC200M"; entity = Some "binary_sensor.ac200m_connected"
                   outputEntity = Some "sensor.ac200m_ac_output_power"
-                  area = Some "Garage"; size = 3 }
+                  area = Some "Garage"; size = 3
+                  powerFrom = PowerUnknown; lan = NoLan }
 
         // ── Manual transfer switch circuits ──────────────────────────────────
         // A C E G H default to AC500 #1, B D F I to AC500 #2 - but every circuit
@@ -126,44 +168,57 @@ module Topology =
         // plug that is online but switched OFF still means no power downstream.
         yield { node "kauf_xx" "Kauf_XX (PLF12)" "plug" with
                   device = Some "Kauf_XX (PLF12)"; entity = Some "switch.kauf_xx"
-                  outputEntity = Some "switch.kauf_xx"; link = Some "ABEWNETG"; size = 1 }
+                  outputEntity = Some "switch.kauf_xx"; link = Some "ABEWNETG"; size = 1
+                  powerFrom = FromDevice "ac500_2"; lan = Wifi "ABEWNETG" }
         yield { node "shelly_us" "Shelly Plug US" "plug" with
                   device = Some "Shelly Plug US"; entity = Some "switch.shellyplugus_048308deba94"
                   outputEntity = Some "switch.shellyplugus_048308deba94"
-                  area = Some "Garage"; link = Some "ABEWNETG"; size = 1 }
+                  area = Some "Garage"; link = Some "ABEWNETG"; size = 1
+                  powerFrom = FromArea "Garage"; lan = Wifi "ABEWNETG" }
 
         // ── Compute ─────────────────────────────────────────────────────────
         yield { node "raspi4" "AbeRaspi4" "pi" with
-                  device = Some "AbeRaspi4"; link = Some "ABEWNETG" }
+                  device = Some "AbeRaspi4"; link = Some "ABEWNETG"
+                  powerFrom = FromDevice "kauf_xx"; lan = Wifi "ABEWNETG" }
         yield { node "raspi_zero" "Pi Zero 2 W (thermal)" "pi" with
                   entity = Some "sensor.thermal_master_p2_thermal_low"
-                  area = Some "Garage"; link = Some "ABEWNETG-GAR" }
+                  area = Some "Garage"; link = Some "ABEWNETG-GAR"
+                  powerFrom = FromDevice "shelly_us"; lan = Wifi "ABEWNETG-GAR" }
         yield { node "mac_studio" "M1 Mac Studio" "computer" with
-                  device = Some "M1 Mac Studio"; area = Some "Game Room"; link = Some "ABEWNETG" }
+                  device = Some "M1 Mac Studio"; area = Some "Game Room"; link = Some "ABEWNETG"
+                  powerFrom = FromArea "Game Room"; lan = Wired "nighthawk" }
         yield { node "homeassistant" "Home Assistant" "host" with
                   device = Some "AbeHomeAssistant"; blindSpot = true; size = 3
-                  remedy = Some "If HA is unreachable, suspect circuit D - switch it to LINE" }
+                  remedy = Some "If HA is unreachable, suspect circuit D - switch it to LINE"
+                  powerFrom = FromDevice "circuit_d"; lan = Wired "nighthawk" }
 
         // ── Mains-only devices (no battery backup) ───────────────────────────
         yield { node "abevue2" "AbeVue2 (energy monitor)" "sensor" with
-                  device = Some "AbeVue2"; entity = Some "sensor.abevue2_10_oven"; link = Some "ABEWNETG" }
+                  device = Some "AbeVue2"; entity = Some "sensor.abevue2_10_oven"; link = Some "ABEWNETG"
+                  powerFrom = FromDevice "grid"; lan = Wifi "ABEWNETG" }
         yield { node "ev_charger" "Emporia EV Charger" "ev" with
-                  device = Some "Emporia EV Charger"; area = Some "Garage"; link = Some "ABEWNETG" }
+                  device = Some "Emporia EV Charger"; area = Some "Garage"; link = Some "ABEWNETG"
+                  powerFrom = FromDevice "grid"; lan = Wifi "ABEWNETG" }
         yield { node "studio_esp32" "StudioESP32x (BT proxy)" "esp32" with
                   device = Some "StudioESP32x"; entity = Some "sensor.studioesp32x_uptime_sensor"
                   area = Some "Studio"; link = Some "ABEWNETG"
-                  remedy = Some "On mains, not battery - a utility outage takes it out even when the Bluettis are fine" }
+                  remedy = Some "On mains, not battery - a utility outage takes it out even when the Bluettis are fine"
+                  powerFrom = FromDevice "grid"; lan = Wifi "ABEWNETG" }
 
         // ── Devices ─────────────────────────────────────────────────────────
         yield { node "kasa_garage" "Kasa Garage camera" "camera" with
-                  device = Some "Kasa Garage"; area = Some "Garage"; link = Some "ABEWNETG" }
+                  device = Some "Kasa Garage"; area = Some "Garage"; link = Some "ABEWNETG"
+                  powerFrom = FromDevice "shelly_us"; lan = Wifi "ABEWNETG" }
         yield { node "cam_driveway" "CloudEdge Driveway" "camera" with
-                  device = Some "CloudEdge Driveway"; area = Some "Driveway"; link = Some "ABEWNETG-GAR" }
+                  device = Some "CloudEdge Driveway"; area = Some "Driveway"; link = Some "ABEWNETG-GAR"
+                  powerFrom = FromArea "Driveway"; lan = Wifi "ABEWNETG-GAR" }
         yield { node "garage_opener" "Garage Opener" "opener" with
                   device = Some "Garage Opener"; entity = Some "cover.garage_door"
-                  area = Some "Garage"; link = Some "ABEWNETG" }
+                  area = Some "Garage"; link = Some "ABEWNETG"
+                  powerFrom = FromDevice "ac500_2"; lan = Wifi "ABEWNETG" }
         yield { node "midea_ac" "Midea window A/C" "appliance" with
-                  device = Some "Midea AC"; area = Some "Garage"; link = Some "ABEWNETG" }
+                  device = Some "Midea AC"; area = Some "Garage"; link = Some "ABEWNETG"
+                  powerFrom = FromDevice "ac200m"; lan = NoLan }
 
         // ── Network ─────────────────────────────────────────────────────────
         // Wiring: modem -wired- eero -wired- Nighthawk, and eero -wired- DBit
@@ -175,15 +230,31 @@ module Topology =
         // what cloud cameras and remote access actually depend on.
         yield { node "internet" "Internet (WAN)" "internet" with
                   entity = Some "binary_sensor.internet_up"; size = 3
-                  remedy = Some "WAN down: LAN and WiFi keep working; cloud cameras, remote access and app-dependent devices do not" }
+                  remedy = Some "WAN down: LAN and WiFi keep working; cloud cameras, remote access and app-dependent devices do not"
+                  powerFrom = PowerUnknown; lan = NoLan }
         yield { node "modem" "Internet modem" "modem" with
-                  area = Some "Game Room"; size = 3 }
+                  area = Some "Game Room"; size = 3
+                  powerFrom = FromDevice "circuit_d"; lan = Wired "internet" }
         yield { node "eero" "eero" "ap" with
-                  device = Some "eero"; link = Some "AbeEero"; size = 3 }
+                  device = Some "eero"; link = Some "AbeEero"; size = 3
+                  powerFrom = FromDevice "circuit_d"; lan = Wired "modem" }
         yield { node "nighthawk" "NETGEAR Nighthawk RAX80" "ap" with
-                  device = Some "NETGEAR RAX80"; link = Some "ABEWNETG"; size = 3 }
+                  device = Some "NETGEAR RAX80"; link = Some "ABEWNETG"; size = 3
+                  powerFrom = FromDevice "circuit_d"; lan = Wired "eero" }
         yield { node "dbit" "DBit router" "ap" with
-                  area = Some "Game Room"; link = Some "ABEWNETG-GAR"; size = 3 }
+                  area = Some "Game Room"; link = Some "ABEWNETG-GAR"; size = 3
+                  powerFrom = FromDevice "circuit_d"; lan = Wired "eero" }
+
+        // ── Areas as power consumers ────────────────────────────────────────
+        // An area can itself be fed from a device, so everything in it inherits
+        // that source without needing its own edge. The Game Room is on circuit
+        // D, which is why losing D takes the whole room (and the network) out.
+        yield { node "area_game_room" "Game Room (area)" "area" with
+                  area = Some "Game Room"; size = 1
+                  powerFrom = FromDevice "circuit_d" }
+        yield { node "area_garage" "Garage (area)" "area" with
+                  area = Some "Garage"; size = 1
+                  powerFrom = FromDevice "grid" }
     ]
 
     let edges : Edge list = [
@@ -260,6 +331,23 @@ module Topology =
         yield { child = "ac500_1"; parent = "raspi4"; kind = BtHost; note = Some "bluetti-mqtt" }
         yield { child = "ac500_2"; parent = "raspi4"; kind = BtHost; note = Some "bluetti-mqtt" }
         yield { child = "ac200m";  parent = "raspi4"; kind = BtHost; note = Some "bluetti-mqtt" }
+    ]
+
+    /// Edges implied by each node's own powerFrom / lan fields, so the two are
+    /// never out of sync. Area-sourced power and wifi produce NO line: the area
+    /// rectangle already encloses the node, and an SSID is shown by its radio
+    /// icon rather than a line fanning into an AP.
+    let derivedEdges (ns: Node list) : Edge list = [
+        for n in ns do
+            match n.powerFrom with
+            | FromDevice k -> yield { child = n.key; parent = k; kind = Power; note = None }
+            | FromArea a   -> ()    // enclosed by the area rectangle; no line
+            | PowerUnknown -> ()
+            match n.lan with
+            | Wired src   -> yield { child = n.key; parent = src; kind = Network; note = Some "wired" }
+            | Powerline a -> ()     // wired access via the area; no line
+            | Wifi _      -> ()     // shown by the radio icon
+            | NoLan       -> ()
     ]
 
     let nodeByKey = nodes |> List.map (fun n -> n.key, n) |> Map.ofList
