@@ -575,6 +575,8 @@
     .e-user    { stroke-dasharray: 1 3; cursor: pointer; }
     .e-user:hover { stroke-width: 3; }
     /* Area grouping rectangles */
+    .area-g { cursor: move; }
+    .area-g.dragging .area-box { stroke: #7c8cf8; stroke-width: 2; }
     .area-box   { fill: rgba(124,140,248,0.045); stroke: #2d3048; stroke-dasharray: 4 4; }
     .area-label { font: 600 9px 'Segoe UI', sans-serif; fill: #5b6478; text-transform: uppercase; letter-spacing: 0.06em; }
     .n-g.connect-src .n-box { stroke: #7c8cf8; stroke-width: 3; }
@@ -660,7 +662,7 @@
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v103 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v104 · js <span id="js-version">?</span></span></h1>
   <span class="view-tabs">
     <button class="view-tab active" data-view="inventory">Inventory</button>
     <button class="view-tab"        data-view="health">Health</button>
@@ -815,6 +817,6 @@
 <div id="ctx-menu" hidden></div>
 
 <script src="app.js?v=89"></script>
-<script src="health.js?v=33"></script>
+<script src="health.js?v=34"></script>
 </body>
 </html>

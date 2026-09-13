@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 33;
+const HEALTH_JS_VERSION = 34;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -460,7 +460,9 @@ function renderDiagram() {
     const y1 = Math.min.apply(null, ns.map(function (n) { return pos.get(n.key).y; })) - 18;
     const x2 = Math.max.apply(null, ns.map(function (n) { return pos.get(n.key).x + boxW(n); })) + 10;
     const y2 = Math.max.apply(null, ns.map(function (n) { return pos.get(n.key).y + boxH(n); })) + 10;
-    return '<g class="area-g"><rect class="area-box" x="' + x1 + '" y="' + y1 +
+    return '<g class="area-g" data-area="' + esc(a.name) + '" data-keys="' +
+           ns.map(function (n) { return n.key; }).join(',') + '">' +
+           '<rect class="area-box" x="' + x1 + '" y="' + y1 +
            '" width="' + (x2 - x1) + '" height="' + (y2 - y1) + '" rx="6"/>' +
            '<text class="area-label" x="' + (x1 + 8) + '" y="' + (y1 + 12) + '">' + esc(a.name) + '</text></g>';
   }).join('');
@@ -594,7 +596,7 @@ function renderDiagram() {
       '<button id="btn-connect" class="' + (connectFrom ? 'on' : '') + '" ' +
         'title="Click this, then click two nodes to connect them">+ connection</button>' +
       '<span class="diag-hint">' +
-        (connectFrom ? 'click the PARENT (source) node…' : 'drag nodes · double-click to edit · shift-click a line to flip it · Ctrl+scroll to zoom') +
+        (connectFrom ? 'click the PARENT (source) node…' : 'drag nodes or an area · double-click to edit · shift-click a line to flip · Ctrl+scroll to zoom') +
       '</span>' +
     '</div>' +
     '<svg id="diag-svg" viewBox="' + vb + '" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">' +
@@ -983,6 +985,24 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H, originX, originY) {
   let drag = null;
 
   svg.addEventListener('mousedown', function (evt) {
+    // Dragging an area rectangle moves everything inside it, so a room can be
+    // repositioned as a unit instead of node by node.
+    const areaG  = evt.target.closest ? evt.target.closest('.area-g') : null;
+    const onNode = evt.target.closest ? evt.target.closest('.n-g')   : null;
+    if (areaG && !onNode && !connectFrom) {
+      const keys = (areaG.dataset.keys || '').split(',').filter(Boolean);
+      const p0 = toSvg(evt);
+      const start = {};
+      keys.forEach(function (k) {
+        const q = pos.get(k);
+        if (q) start[k] = { x: q.x, y: q.y };
+      });
+      drag = { kind: 'area', keys: keys, x0: p0.x, y0: p0.y, start: start };
+      areaG.classList.add('dragging');
+      evt.preventDefault();
+      return;
+    }
+
     const g = evt.target.closest ? evt.target.closest('.n-g') : null;
 
     // Connection mode: first click picks the parent, second the child.
@@ -1020,6 +1040,18 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H, originX, originY) {
   window.addEventListener('mousemove', function (evt) {
     if (!drag) return;
     const p = toSvg(evt);
+    if (drag.kind === 'area') {
+      // Move every member of the area by the same delta, so the room keeps its
+      // internal arrangement.
+      const adx = p.x - drag.x0, ady = p.y - drag.y0;
+      drag.keys.forEach(function (k) {
+        const st = drag.start[k];
+        if (!st) return;
+        nodePos[k] = { x: snap(st.x + adx), y: snap(st.y + ady) };
+      });
+      redrawPositions();
+      return;
+    }
     if (drag.kind === 'node') {
       // Snap to a grid so hand-arranged layouts stay tidy.
       const nx = snap(p.x - drag.dx), ny = snap(p.y - drag.dy);
@@ -1035,6 +1067,13 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H, originX, originY) {
   });
 
   window.addEventListener('mouseup', function () {
+    if (drag && drag.kind === 'area') {
+      saveNodePos();
+      document.querySelectorAll('.dragging').forEach(function (e) { e.classList.remove('dragging'); });
+      drag = null;
+      renderDiagram();          // re-fit the area rectangle around its members
+      return;
+    }
     if (drag && drag.kind === 'node') saveNodePos();
     document.querySelectorAll('.dragging').forEach(function (e) { e.classList.remove('dragging'); });
     drag = null;
