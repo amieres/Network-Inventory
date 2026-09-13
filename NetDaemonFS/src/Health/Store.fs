@@ -290,6 +290,33 @@ ON CONFLICT(node_key) DO UPDATE SET
         cmd.Parameters.AddWithValue(n, v) |> ignore
     cmd.ExecuteNonQuery() |> ignore
 
+/// Rename a node key, moving every stored row that references it. Without this
+/// a rename silently orphans the node's overrides, note, position and edges.
+let renameNode (conn: SqliteConnection) (oldKey: string) (newKey: string) =
+    use tx = conn.BeginTransaction()
+    let exec sql =
+        use cmd = conn.CreateCommand()
+        cmd.Transaction <- tx
+        cmd.CommandText <- sql
+        cmd.Parameters.AddWithValue("$old", oldKey) |> ignore
+        cmd.Parameters.AddWithValue("$new", newKey) |> ignore
+        cmd.ExecuteNonQuery() |> ignore
+    exec "UPDATE OR REPLACE health_node_overrides SET node_key = $new WHERE node_key = $old"
+    exec "UPDATE OR REPLACE health_custom_nodes   SET node_key = $new WHERE node_key = $old"
+    exec "UPDATE OR REPLACE health_node_notes     SET node_key = $new WHERE node_key = $old"
+    exec "UPDATE OR REPLACE health_node_pos       SET node_key = $new WHERE node_key = $old"
+    exec "UPDATE OR REPLACE health_user_edges     SET child  = $new WHERE child  = $old"
+    exec "UPDATE OR REPLACE health_user_edges     SET parent = $new WHERE parent = $old"
+    // Other nodes may point at the old key as their power / LAN / BLE source.
+    for col, prefix in [ "power_from", "device:"; "alt_from", "device:"; "lan", "wired:" ] do
+        use cmd = conn.CreateCommand()
+        cmd.Transaction <- tx
+        cmd.CommandText <- $"UPDATE health_node_overrides SET {col} = $newv WHERE {col} = $oldv"
+        cmd.Parameters.AddWithValue("$oldv", prefix + oldKey) |> ignore
+        cmd.Parameters.AddWithValue("$newv", prefix + newKey) |> ignore
+        cmd.ExecuteNonQuery() |> ignore
+    tx.Commit()
+
 /// Tombstone rather than delete, so a node seeded in Topology.fs can be hidden.
 let deleteNode (conn: SqliteConnection) (key: string) =
     use cmd = conn.CreateCommand()

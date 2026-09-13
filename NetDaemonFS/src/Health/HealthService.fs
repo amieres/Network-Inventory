@@ -360,6 +360,11 @@ type HealthService
         Store.migrate c
         Store.saveNote c key note
 
+    member _.RenameNode(oldKey, newKey) =
+        use c = openDb ()
+        Store.migrate c
+        Store.renameNode c oldKey newKey
+
     member _.DeleteNode(key) =
         use c = openDb ()
         Store.migrate c

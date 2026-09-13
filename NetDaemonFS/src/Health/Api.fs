@@ -247,7 +247,18 @@ let private getTopology (svc: HealthService) : HttpHandler =
                            // Distinct SSIDs seen in the topology, so the editor can
                            // offer them instead of requiring free text.
                            links = liveNodes |> List.choose (fun n -> n.link) |> List.distinct |> List.sort
-                           kinds = liveNodes |> List.map (fun n -> n.kind) |> List.distinct |> List.sort
+                           kinds =
+                             // A fixed catalogue UNIONED with kinds in use: deriving
+                             // the list purely from usage meant the last node of a
+                             // kind changing type deleted that option permanently.
+                             [ "grid"; "battery"; "breaker"; "triple-switch"; "circuit"
+                               "plug"; "outlet"; "ap"; "modem"; "internet"; "switch"
+                               "pi"; "computer"; "host"; "esp32"; "sensor"; "camera"
+                               "ev"; "opener"; "appliance"; "zone"; "area"; "device" ]
+                             @ (liveNodes |> List.map (fun n -> n.kind))
+                             |> List.distinct
+                             |> List.filter (fun k -> not (String.IsNullOrWhiteSpace k))
+                             |> List.sort
                            // Only infrastructure can be a WIRED source - offering
                            // every device made the list unusable.
                            wiredSources =
@@ -350,6 +361,24 @@ let private addNode (svc: HealthService) : HttpHandler =
 type KeyDto = { key : string }
 
 [<CLIMutable>]
+type RenameDto = { oldKey : string; newKey : string }
+
+let private renameNode (svc: HealthService) : HttpHandler =
+    fun ctx -> task {
+        try
+            let! dto = Request.getJson<RenameDto> ctx
+            if String.IsNullOrWhiteSpace dto.oldKey || String.IsNullOrWhiteSpace dto.newKey then
+                return! (Response.withStatusCode 400 >> Response.ofJson {| error = "oldKey and newKey required" |}) ctx
+            elif dto.oldKey = dto.newKey then
+                return! Response.ofJson {| ok = true; unchanged = true |} ctx
+            else
+                svc.RenameNode(dto.oldKey, dto.newKey)
+                return! Response.ofJson {| ok = true |} ctx
+        with ex ->
+            return! (Response.withStatusCode 400 >> Response.ofJson {| error = ex.Message |}) ctx
+    }
+
+[<CLIMutable>]
 type NoteDto = { key : string; note : string }
 
 let private saveNote (svc: HealthService) : HttpHandler =
@@ -406,4 +435,5 @@ let routes (svc: HealthService) : HttpEndpoint list = [
     post "/api/health/node/new"  (addNode       svc)
     post "/api/health/node/del"  (deleteNode    svc)
     post "/api/health/note"      (saveNote      svc)
+    post "/api/health/node/rename" (renameNode  svc)
 ]

@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 29;
+const HEALTH_JS_VERSION = 30;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -660,7 +660,12 @@ function openNodeEditor(key) {
                (lanKind === 'wifi' && lanVal === l ? ' selected' : '') + '>WiFi: ' + esc(l) + '</option>';
       }).join('') +
       '</select></label>' +
-    '<label>Type<select id="ed-kind">' + opts(kinds, n.kind, '(unchanged)') + '</select></label>' +
+    '<label>Type<select id="ed-kind">' + opts(kinds, n.kind, '(unchanged)') +
+      '<option value="__new__">+ new type…</option></select>' +
+      '<input id="ed-kind-new" placeholder="name a new type" style="display:none">' +
+      '</label>' +
+    '<label>Key <span class="ed-warn">(renaming moves notes, position and links)</span>' +
+      '<input id="ed-key" value="' + esc(n.key) + '"></label>' +
     '<label>Box size<select id="ed-size">' +
       '<option value="1"' + (n.size === 1 ? ' selected' : '') + '>small</option>' +
       '<option value="2"' + (n.size === 2 ? ' selected' : '') + '>normal</option>' +
@@ -679,6 +684,16 @@ function openNodeEditor(key) {
 
   document.getElementById('node-editor-title').textContent = 'Edit ' + n.label;
   document.getElementById('node-editor').hidden = false;
+
+  const kindSel = document.getElementById('ed-kind');
+  const kindNew = document.getElementById('ed-kind-new');
+  if (kindSel && kindNew) {
+    kindSel.addEventListener('change', function () {
+      const isNew = kindSel.value === '__new__';
+      kindNew.style.display = isNew ? '' : 'none';
+      if (isNew) kindNew.focus();
+    });
+  }
 
 
 }
@@ -725,14 +740,28 @@ async function saveNodeEditor() {
     label:   document.getElementById('ed-label').value.trim(),
     area:    newArea || document.getElementById('ed-area').value,
     link:    lan.indexOf('wifi:') === 0 ? lan.slice(5) : '',
-    kind:    document.getElementById('ed-kind').value || null,
+    kind:    (function () {
+               const sel = document.getElementById('ed-kind').value;
+               if (sel !== '__new__') return sel || null;
+               const typed = (document.getElementById('ed-kind-new') || {}).value || '';
+               return typed.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-') || null;
+             })(),
     size:    parseInt(document.getElementById('ed-size').value, 10),
     powerFrom: powerFrom,
     lan:       lan,
     position:  (document.getElementById('ed-pos') || {}).value || '',
     altFrom:   (document.getElementById('ed-alt') || {}).value || ''
   };
+  // A key change has to happen FIRST, so the override/note writes below land on
+  // the new key rather than resurrecting the old one.
+  const keyEl = document.getElementById('ed-key');
+  const newKey = keyEl ? keyEl.value.trim() : editingKey;
   try {
+    if (newKey && newKey !== editingKey) {
+      await api('POST', '/api/health/node/rename', { oldKey: editingKey, newKey: newKey });
+      editingKey = newKey;
+      body.nodeKey = newKey;
+    }
     await api('POST', '/api/health/node', body);
     const noteEl = document.getElementById('ed-note');
     if (noteEl && editingKey) {
