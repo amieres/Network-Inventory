@@ -55,6 +55,25 @@ let classify (gapsSeconds: float list) : Cadence =
         elif p95 <= burstyP95                            then Bursty   (p95, median)
         else                                                  Event    p95
 
+// ── Diurnal entities ─────────────────────────────────────────────────────────
+// Solar sensors legitimately stop changing at night: PV power sits at 0 from
+// sunset to sunrise, so "time since last change" makes them look dead every
+// single night. Measured 2026-09-13 02:19 local: total_pv_power, total_net_power
+// and the AC500 DC-input sensors all last changed at 19:38-19:45 (sunset) and
+// were flagged stale - all false.
+//
+// These entities get a much wider threshold so they only alarm if they are still
+// silent well into the day.
+let diurnalHints = [ "pv_power"; "pv_energy"; "pv_daily"; "dc_input_power"; "solar"; "net_power" ]
+
+let isDiurnal (entityId: string) =
+    let id = entityId.ToLowerInvariant()
+    diurnalHints |> List.exists id.Contains
+
+/// Night-time slack for sun-driven sensors: long enough to span a night plus a
+/// dull morning, so a genuinely dead PV sensor still surfaces within a day.
+let diurnalThreshold = TimeSpan.FromHours 16.0
+
 // ── Threshold derivation ─────────────────────────────────────────────────────
 // Multiple of p95, floored so fast sensors don't alarm on a single missed beat.
 // eg4_battery_1_power has p95 = 13 s; 4x = 52 s, floored to 3 min. The real
@@ -71,6 +90,11 @@ let thresholdFor (cadence: Cadence) : TimeSpan option =
         Some (if t < minThreshold then minThreshold elif t > maxThreshold then maxThreshold else t)
     | Event _ | Sparse _ -> None
 
+/// Threshold for a specific entity: sun-driven sensors get night-time slack.
+let thresholdForEntity (entityId: string) (cadence: Cadence) : TimeSpan option =
+    thresholdFor cadence
+    |> Option.map (fun t -> if isDiurnal entityId && t < diurnalThreshold then diurnalThreshold else t)
+
 // ── What kind of watch (if any) an entity gets ───────────────────────────────
 // `currentState` is the entity's state at learn time.
 //   already unavailable  -> None. It is absent, not failing. 125 entities are in
@@ -79,11 +103,11 @@ let thresholdFor (cadence: Cadence) : TimeSpan option =
 //   learnable cadence    -> Staleness. Catches the EG4-ESP32 silent-stall class.
 //   no cadence but live  -> Liveness. Catches the RainMachine class, where a
 //                           working device goes straight to `unavailable`.
-let watchFor (cadence: Cadence) (currentState: string) : Watch option =
+let watchFor (entityId: string) (cadence: Cadence) (currentState: string) : Watch option =
     match currentState with
     | "unavailable" | "unknown" | null -> None
     | _ ->
-        match thresholdFor cadence with
+        match thresholdForEntity entityId cadence with
         | Some t -> Some (Staleness t)
         | None   -> Some Liveness
 

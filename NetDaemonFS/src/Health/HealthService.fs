@@ -107,7 +107,7 @@ type HealthService
                 let gaps    = gapsByEntity |> Map.tryFind entityId |> Option.defaultValue []
                 let cadence = Rules.classify gaps
                 let current = match ha.GetState entityId with null -> null | s -> s.State
-                match Rules.watchFor cadence current with
+                match Rules.watchFor entityId cadence current with
                 | Some watch ->
                     let existing = match monitors.TryGetValue entityId with | true, m -> Some m | _ -> None
                     // Re-learning is also how a device that changed purpose, moved or

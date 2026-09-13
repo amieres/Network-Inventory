@@ -70,16 +70,24 @@ let private getDevices (svc: HealthService) : HttpHandler =
             |> List.map (fun (k, v) -> k, v)
             |> dict
         let pick k = match counts.TryGetValue k with | true, v -> v | _ -> 0
+        // Fault counts must be over REAL devices: the table hides helpers by
+        // default, so counting them in the banner reports problems the user
+        // cannot see or act on.
+        let realCounts = realRows |> List.countBy (fun r -> r.state) |> dict
+        let pickReal k = match realCounts.TryGetValue k with | true, v -> v | _ -> 0
         Response.ofJson
             {| ready    = svc.IsReady
                total    = List.length realRows
                totalAll = List.length rows
                helpers  = (List.length rows) - (List.length realRows)
-               ok       = pick "ok"
-               stale    = pick "stale"
-               unavailable = pick "unavailable"
-               warmup   = pick "warmup"
-               retired  = pick "retired"
+               ok       = pickReal "ok"
+               stale    = pickReal "stale"
+               unavailable = pickReal "unavailable"
+               warmup   = pickReal "warmup"
+               retired  = pickReal "retired"
+               // Helper-only faults, surfaced separately so they are visible
+               // without inflating the device count.
+               helperFaults = (pick "stale" + pick "unavailable") - (pickReal "stale" + pickReal "unavailable")
                devices  = rows |} ctx
 
 let private getEntities (svc: HealthService) : HttpHandler =

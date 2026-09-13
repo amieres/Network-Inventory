@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 12;
+const HEALTH_JS_VERSION = 13;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -122,7 +122,13 @@ function renderHealth() {
     banner.textContent = 'Learning reporting patterns from history…';
   } else if (faults === 0) {
     banner.className = 'h-banner good';
-    banner.innerHTML = 'All <b>' + d.total + '</b> devices reporting normally.';
+    banner.innerHTML = 'All <b>' + d.total + '</b> devices reporting normally.' +
+      // Helper faults are real but not actionable device problems, so they are
+      // mentioned rather than counted as devices.
+      (d.helperFaults
+        ? '<div class="h-root">' + d.helperFaults + ' helper sensor' +
+          (d.helperFaults === 1 ? '' : 's') + ' also stale — see the Helpers filter.</div>'
+        : '');
   } else {
     banner.className = 'h-banner bad';
     let html = '<b>' + faults + '</b> device' + (faults === 1 ? '' : 's') + ' not reporting.';
