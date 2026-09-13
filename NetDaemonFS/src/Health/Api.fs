@@ -127,8 +127,10 @@ let private getTopology (svc: HealthService) : HttpHandler =
 
         // Raw entity states, for output/link indicators.
         let entRaw = svc.GetRawStates()
-        // Current IPs from the inventory, shown in the wifi/wired tooltips.
-        let deviceIps = svc.GetDeviceIps()
+        // Interfaces from the inventory: one icon per physical interface, so a
+        // device with both ethernet and wifi (the Mac Studio) shows both, each
+        // with its own MAC and IP, and a BLE-capable device gets a bluetooth icon.
+        let deviceIfaces = svc.GetDeviceIfaces()
 
         // A node has no power when an ancestor power-edge parent is faulted, or
         // when the plug/station feeding it reports its output off.
@@ -179,8 +181,14 @@ let private getTopology (svc: HealthService) : HttpHandler =
                    link      = n.link
                    powerFrom = n.powerFrom.label
                    lan       = n.lan.label
-                   // Tooltip for the radio / wired icon.
-                   ip        = n.device |> Option.bind (fun d -> deviceIps |> Map.tryFind d)
+                   // One entry per physical interface, straight from the
+                   // inventory - the topology does not re-declare MACs or IPs.
+                   ifaces    =
+                     n.device
+                     |> Option.bind (fun d -> deviceIfaces |> Map.tryFind d)
+                     |> Option.defaultValue []
+                     |> List.map (fun i ->
+                          {| kind = i.kind.label; mac = i.mac; ip = i.ip; conn = i.conn |})
                    // Output state: a station or plug can be healthy while its
                    // output is switched OFF, which is a different failure from
                    // the device itself being down.

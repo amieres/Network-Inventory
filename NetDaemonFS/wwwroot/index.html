@@ -545,6 +545,7 @@
     .ed-check input { accent-color: #4f46e5; }
     .ed-meta { font-size: 0.72rem; color: #475569; }
     .ed-meta code { color: #7c8cf8; }
+    .ed-ifaces { margin-top: 0.3rem; color: #64748b; font-family: ui-monospace, monospace; font-size: 0.68rem; }
     .ed-foot { padding: 0.6rem 1rem; border-top: 1px solid #2d3048;
                display: flex; justify-content: flex-end; gap: 0.4rem; }
     .ed-foot button { padding: 0.35rem 0.9rem; border-radius: 4px; cursor: pointer;
@@ -586,7 +587,7 @@
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v84 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v85 · js <span id="js-version">?</span></span></h1>
   <span class="view-tabs">
     <button class="view-tab active" data-view="inventory">Inventory</button>
     <button class="view-tab"        data-view="health">Health</button>
@@ -643,7 +644,7 @@
     <b>◍</b> blind spot — its failure also takes Home Assistant down, so nothing would be reported ·
     <span class="lg-dead">grey box</span> = no power ·
     <span class="lg-pip">●</span> output switched off ·
-    grey radio icon = no wifi/bluetooth &middot; hover a radio/wired icon for its IP &middot;
+    grey radio icon = no wifi/bluetooth &middot; one icon per interface (wired / wifi / bluetooth) &mdash; hover for MAC &amp; IP &middot;
     SSID: <span style="color:#a78bfa">AbeEero</span>
     <span style="color:#38bdf8">ABEWNETG</span>
     <span style="color:#22d3ee">ABEWNETG-5G</span>
@@ -737,6 +738,6 @@
 <div id="ctx-menu" hidden></div>
 
 <script src="app.js?v=89"></script>
-<script src="health.js?v=14"></script>
+<script src="health.js?v=15"></script>
 </body>
 </html>

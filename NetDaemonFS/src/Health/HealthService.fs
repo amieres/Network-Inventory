@@ -332,18 +332,19 @@ type HealthService
         |> List.filter (fun e -> live.Contains e.child && live.Contains e.parent)
         |> List.distinctBy (fun e -> e.child, e.parent, e.kind)
 
-    /// Current IP per inventory device name, for the wifi/wired tooltips.
-    member _.GetDeviceIps() : Map<string, string> =
+    /// Interfaces per inventory device name: one entry per physical interface,
+    /// with its MAC, IP and kind. A device can legitimately have several - the
+    /// Mac Studio has an ethernet and a wifi interface with DIFFERENT MACs and
+    /// IPs - so the diagram shows an icon per interface rather than one per
+    /// device. Bluetooth addresses come through the same way, which is how a
+    /// BLE-capable device gets its bluetooth icon.
+    member _.GetDeviceIfaces() : Map<string, Ifaces.Iface list> =
         try
             use c = openDb ()
-            use cmd = c.CreateCommand()
-            cmd.CommandText <-
-                "SELECT d.name, i.ip FROM devices d JOIN device_ips i ON i.device_id = d.id                  WHERE i.is_current = 1 AND d.name IS NOT NULL"
-            use r = cmd.ExecuteReader()
-            let acc = ResizeArray()
-            while r.Read() do acc.Add(r.GetString 0, r.GetString 1)
-            acc |> Seq.distinctBy fst |> Map.ofSeq
-        with _ -> Map.empty
+            Ifaces.load c
+        with ex ->
+            log.LogWarning(ex, "Health: could not load device interfaces")
+            Map.empty
 
     member _.AddNode(key, label, kind, area, device, entity, powerFrom, lan, size) =
         use c = openDb ()

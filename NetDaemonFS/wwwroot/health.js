@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 14;
+const HEALTH_JS_VERSION = 15;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -265,32 +265,63 @@ function iconFor(kind, x, y, dim) {
   }
 }
 
-// Radio / wired indicator. WiFi is an arc tinted by SSID; wired is a plug-and-
-// cable glyph; powerline is wired-via-the-area. Greyed when the link is down.
-// The tooltip carries the device's current IP, pulled from the inventory.
-function linkIcon(n, x, y, up) {
-  const lan = n.lan || '';
-  if (!lan || lan === 'none') return '';          // not a smart device at all
-  const wifi = lan.indexOf('wifi:') === 0;
-  const ssid = wifi ? lan.slice(5) : null;
-  const c = !up ? '#475569' : (wifi ? (LINK_COLOR[ssid] || '#94a3b8') : '#94a3b8');
+// One icon per PHYSICAL interface, read from the inventory - a device with both
+// ethernet and wifi (the Mac Studio) gets two icons with different MACs and IPs,
+// and a BLE-capable device gets a bluetooth icon alongside. Tooltips carry the
+// MAC and IP so the diagram ties back to the inventory entry.
+function ifaceGlyph(kind, c) {
+  if (kind === 'wifi') {
+    return '<path d="M0 4a6 6 0 0 1 8 0"/><path d="M2 6.2a3 3 0 0 1 4 0"/>' +
+           '<circle cx="4" cy="8.4" r=".8" fill="' + c + '" stroke="none"/>';
+  }
+  if (kind === 'bluetooth') {
+    return '<path d="M3 2.5l4 3.5-4 3.5V1l4 3.5-4 3.5"/>';
+  }
+  // wired: a socket with a cable running out of it
+  return '<rect x="0" y="2" width="5" height="5" rx="1"/>' +
+         '<path d="M5 4.5h2.5a2 2 0 0 1 2 2V9"/>' +
+         '<circle cx="9.5" cy="9.6" r=".9" fill="' + c + '" stroke="none"/>';
+}
 
-  const tip = (wifi ? 'WiFi: ' + ssid
+function ifaceIcons(n, rightX, y, up) {
+  const list = (n.ifaces && n.ifaces.length) ? n.ifaces : [];
+
+  // No inventory match: fall back to the declared LAN kind so a node still shows
+  // something meaningful. `none` means not a smart device - no icon at all.
+  if (!list.length) {
+    const lan = n.lan || 'none';
+    if (lan === 'none') return '';
+    const wifi = lan.indexOf('wifi:') === 0;
+    const ssid = wifi ? lan.slice(5) : null;
+    const c = !up ? '#475569' : (wifi ? (LINK_COLOR[ssid] || '#94a3b8') : '#94a3b8');
+    const tip = wifi ? 'WiFi: ' + ssid
               : lan.indexOf('powerline:') === 0 ? 'Wired via powerline (' + lan.slice(10) + ')'
               : lan.indexOf('wired:') === 0 ? 'Wired from ' + lan.slice(6)
-              : lan) + (n.ip ? ' — ' + n.ip : '');
+              : lan;
+    return '<g class="lan-icon" transform="translate(' + (rightX - 12) + ',' + y + ')" fill="none" stroke="' + c +
+           '" stroke-width="1.4" stroke-linecap="round"><title>' + esc(tip) + '</title>' +
+           ifaceGlyph(wifi ? 'wifi' : 'wired', c) + '</g>';
+  }
 
-  const glyph = wifi
-    ? '<path d="M0 4a6 6 0 0 1 8 0"/><path d="M2 6.2a3 3 0 0 1 4 0"/>' +
-      '<circle cx="4" cy="8.4" r=".8" fill="' + c + '" stroke="none"/>'
-    // Wired: a socket with a cable running out of it.
-    : '<rect x="0" y="2" width="5" height="5" rx="1"/>' +
-      '<path d="M5 4.5h2.5a2 2 0 0 1 2 2V9"/>' +
-      '<circle cx="9.5" cy="9.6" r=".9" fill="' + c + '" stroke="none"/>';
-
-  return '<g class="lan-icon" transform="translate(' + x + ',' + y + ')" fill="none" stroke="' + c +
-         '" stroke-width="1.4" stroke-linecap="round"><title>' + esc(tip) + '</title>' +
-         glyph + '</g>';
+  const ssid = (n.lan || '').indexOf('wifi:') === 0 ? n.lan.slice(5) : null;
+  return list.map(function (f, idx) {
+    const c = !up ? '#475569'
+            : f.kind === 'bluetooth' ? '#c084fc'
+            : f.kind === 'wifi'      ? (LINK_COLOR[ssid] || '#38bdf8')
+            : '#94a3b8';
+    const label = f.kind === 'bluetooth' ? 'Bluetooth'
+                : f.kind === 'wifi'      ? ('WiFi' + (ssid ? ': ' + ssid : ''))
+                : 'Wired';
+    const tip = label +
+                (f.ip  ? ' — ' + f.ip  : '') +
+                (f.mac ? ' — ' + f.mac : '') +
+                (f.conn ? ' (' + f.conn + ')' : '');
+    // Lay the icons out right-to-left so the box label is never overlapped.
+    const x = rightX - 12 - idx * 13;
+    return '<g class="lan-icon" transform="translate(' + x + ',' + y + ')" fill="none" stroke="' + c +
+           '" stroke-width="1.4" stroke-linecap="round"><title>' + esc(tip) + '</title>' +
+           ifaceGlyph(f.kind, c) + '</g>';
+  }).join('');
 }
 
 function renderDiagram() {
@@ -419,7 +450,7 @@ function renderDiagram() {
       '<text class="n-label' + (noPower ? ' dim' : '') + '" x="' + (p.x + 23) + '" y="' + (p.y + (n.size === 1 ? 17 : 14)) + '">' + esc(label) + '</text>' +
       (n.size === 1 ? '' :
         '<text class="n-kind" x="' + (p.x + 23) + '" y="' + (p.y + 26) + '">' + esc(n.kind) + '</text>') +
-      linkIcon(n, p.x + w - 22, p.y + 4, n.radioUp !== false) +
+      ifaceIcons(n, p.x + w - 6, p.y + 4, n.radioUp !== false) +
       outPip + blind + '</g>';
   }
 
@@ -493,52 +524,48 @@ function openNodeEditor(key) {
     '<label>Name<input id="ed-label" value="' + esc(n.label) + '"></label>' +
     '<label>Area<select id="ed-area">' + opts(areas, n.area, '(none)') + '</select>' +
       '<input id="ed-area-new" placeholder="or type a new area"></label>' +
-    // Power source: a device, or simply the area (which draws no line).
-    '<label>Power from<select id="ed-power-kind">' +
-      '<option value=""' + (!n.powerFrom ? ' selected' : '') + '>(unknown)</option>' +
-      '<option value="area"' + (pfKind === 'area' ? ' selected' : '') + '>the area</option>' +
-      '<option value="device"' + (pfKind === 'device' ? ' selected' : '') + '>another device</option>' +
-      '</select>' +
-      '<select id="ed-power-val">' + opts(deviceKeys, pfVal, '(choose)') + '</select>' +
-      '<select id="ed-power-area">' + opts(areas, pfVal, '(choose area)') + '</select>' +
-      '</label>' +
-    // LAN: none <> wired. none means the device is not smart at all.
-    '<label>LAN access<select id="ed-lan-kind">' +
+    // Power: one selector. "the area" means THIS node's area - no second picker.
+    '<label>Power from<select id="ed-power">' +
+      '<option value=""' + (!pf ? ' selected' : '') + '>(none / unknown)</option>' +
+      '<option value="area"' + (pfKind === 'area' ? ' selected' : '') + '>the area it is in</option>' +
+      deviceKeys.map(function (k) {
+        return '<option value="device:' + esc(k) + '"' +
+               (pfKind === 'device' && pfVal === k ? ' selected' : '') + '>' + esc(k) + '</option>';
+      }).join('') +
+      '</select></label>' +
+    // LAN: one selector. `none` is NOT `wired` - it means no network at all.
+    '<label>LAN access<select id="ed-lan">' +
       '<option value="none"' + (lanKind === 'none' ? ' selected' : '') + '>none (not a smart device)</option>' +
-      '<option value="wifi"' + (lanKind === 'wifi' ? ' selected' : '') + '>WiFi</option>' +
-      '<option value="wired"' + (lanKind === 'wired' ? ' selected' : '') + '>wired</option>' +
-      '<option value="powerline"' + (lanKind === 'powerline' ? ' selected' : '') + '>powerline (via area)</option>' +
-      '</select>' +
-      '<select id="ed-lan-ssid">' + opts(links, lanVal, '(choose SSID)') + '</select>' +
-      '<select id="ed-lan-src">' + opts(deviceKeys, lanVal, '(choose source)') + '</select>' +
-      '<select id="ed-lan-area">' + opts(areas, lanVal, '(choose area)') + '</select>' +
-      '</label>' +
+      '<option value="powerline"' + (lanKind === 'powerline' ? ' selected' : '') + '>powerline (via the area)</option>' +
+      deviceKeys.map(function (k) {
+        return '<option value="wired:' + esc(k) + '"' +
+               (lanKind === 'wired' && lanVal === k ? ' selected' : '') +
+               '>wired from ' + esc(k) + '</option>';
+      }).join('') +
+      links.map(function (l) {
+        return '<option value="wifi:' + esc(l) + '"' +
+               (lanKind === 'wifi' && lanVal === l ? ' selected' : '') + '>WiFi: ' + esc(l) + '</option>';
+      }).join('') +
+      '</select></label>' +
     '<label>Type<select id="ed-kind">' + opts(kinds, n.kind, '(unchanged)') + '</select></label>' +
     '<label>Box size<select id="ed-size">' +
       '<option value="1"' + (n.size === 1 ? ' selected' : '') + '>small</option>' +
       '<option value="2"' + (n.size === 2 ? ' selected' : '') + '>normal</option>' +
       '<option value="3"' + (n.size === 3 ? ' selected' : '') + '>large</option>' +
       '</select></label>' +
-    '<label class="ed-check"><input type="checkbox" id="ed-ac"' + (n.acInput ? ' checked' : '') + '>' +
-      ' Takes AC input from the grid</label>' +
     '<div class="ed-meta">key: <code>' + esc(n.key) + '</code>' +
-      (n.device ? ' · device: ' + esc(n.device) : '') + '</div>';
+      (n.device ? ' · inventory: ' + esc(n.device) : ' · <i>no inventory link</i>') +
+      ((n.ifaces || []).length
+        ? '<div class="ed-ifaces">' + n.ifaces.map(function (f) {
+            return '<div>' + esc(f.kind) + ': ' + esc(f.mac) + (f.ip ? ' · ' + esc(f.ip) : '') + '</div>';
+          }).join('') + '</div>'
+        : '') +
+      '</div>';
 
   document.getElementById('node-editor-title').textContent = 'Edit ' + n.label;
   document.getElementById('node-editor').hidden = false;
 
-  function syncEditorSelects() {
-    const pk = document.getElementById('ed-power-kind').value;
-    document.getElementById('ed-power-val').style.display  = pk === 'device' ? '' : 'none';
-    document.getElementById('ed-power-area').style.display = pk === 'area'   ? '' : 'none';
-    const lk = document.getElementById('ed-lan-kind').value;
-    document.getElementById('ed-lan-ssid').style.display = lk === 'wifi'      ? '' : 'none';
-    document.getElementById('ed-lan-src').style.display  = lk === 'wired'     ? '' : 'none';
-    document.getElementById('ed-lan-area').style.display = lk === 'powerline' ? '' : 'none';
-  }
-  document.getElementById('ed-power-kind').addEventListener('change', syncEditorSelects);
-  document.getElementById('ed-lan-kind').addEventListener('change', syncEditorSelects);
-  syncEditorSelects();
+
 }
 
 async function deleteCurrentNode() {
@@ -570,24 +597,21 @@ function closeNodeEditor() {
 async function saveNodeEditor() {
   if (!editingKey) return;
   const newArea = document.getElementById('ed-area-new').value.trim();
-  const pk = document.getElementById('ed-power-kind').value;
-  const powerFrom = pk === 'device' ? 'device:' + document.getElementById('ed-power-val').value
-                  : pk === 'area'   ? 'area:'   + document.getElementById('ed-power-area').value
-                  : '';
-  const lk = document.getElementById('ed-lan-kind').value;
-  const lan = lk === 'wifi'      ? 'wifi:'      + document.getElementById('ed-lan-ssid').value
-            : lk === 'wired'     ? 'wired:'     + document.getElementById('ed-lan-src').value
-            : lk === 'powerline' ? 'powerline:' + document.getElementById('ed-lan-area').value
-            : 'none';
+  const pvRaw = document.getElementById('ed-power').value;
+  const areaNow = newArea || document.getElementById('ed-area').value || '';
+  // "area" means the node's own area, so it is resolved here rather than asking
+  // the user to pick an area twice.
+  const powerFrom = pvRaw === 'area' ? (areaNow ? 'area:' + areaNow : '') : pvRaw;
+  const lanRaw = document.getElementById('ed-lan').value;
+  const lan = lanRaw === 'powerline' ? (areaNow ? 'powerline:' + areaNow : 'none') : lanRaw;
 
   const body = {
     nodeKey: editingKey,
     label:   document.getElementById('ed-label').value.trim(),
     area:    newArea || document.getElementById('ed-area').value,
-    link:    lk === 'wifi' ? document.getElementById('ed-lan-ssid').value : '',
+    link:    lan.indexOf('wifi:') === 0 ? lan.slice(5) : '',
     kind:    document.getElementById('ed-kind').value || null,
     size:    parseInt(document.getElementById('ed-size').value, 10),
-    acInput: document.getElementById('ed-ac').checked,
     powerFrom: powerFrom,
     lan:       lan
   };
