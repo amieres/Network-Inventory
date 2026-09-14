@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 36;
+const HEALTH_JS_VERSION = 37;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -459,7 +459,12 @@ function renderDiagram() {
   // ── Area rectangles: bounding box of each area's nodes ──
   const areaSvg = areas.map(function (a) {
     const ns = a.keys.map(function (k) { return byKey.get(k); }).filter(Boolean);
-    if (ns.length < 2) return '';
+    // A one-device area still gets a box: an area is a declared fact about
+    // where something lives, not a grouping that only earns its keep at two
+    // members. StudioX and Driveway each hold a single device.
+    if (!ns.length) return '';
+    // Every member must have a position, or the bounding box comes out NaN.
+    if (ns.some(function (n) { return !pos.get(n.key); })) return '';
     const x1 = Math.min.apply(null, ns.map(function (n) { return pos.get(n.key).x; })) - 10;
     const y1 = Math.min.apply(null, ns.map(function (n) { return pos.get(n.key).y; })) - 18;
     const x2 = Math.max.apply(null, ns.map(function (n) { return pos.get(n.key).x + boxW(n); })) + 10;
