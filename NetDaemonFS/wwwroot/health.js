@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 38;
+const HEALTH_JS_VERSION = 39;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -46,7 +46,14 @@ function saveNodePos() {
         return p && isFinite(p.x) && isFinite(p.y);
       })
       .map(function (k) { return { key: k, x: nodePos[k].x, y: nodePos[k].y }; });
-    if (ps.length) api('POST', '/api/health/positions', ps).catch(function () {});
+    if (ps.length) {
+      api('POST', '/api/health/positions', ps)
+        .then(function () {
+          // Local and server now agree; a later load can trust the server.
+          localStorage.setItem('healthNodePosSyncedAt', new Date().toISOString());
+        })
+        .catch(function () {});
+    }
   }, 800);
 }
 
@@ -111,16 +118,38 @@ async function loadHealth() {
     ]);
     healthData = results[0];
     topoData   = results[1];
-    // Merge server positions PER NODE rather than all-or-nothing. The old
-    // guard only adopted them when localStorage was completely empty, so nodes
-    // added later (e.g. a new set of breakers) never picked up their stored
-    // positions and fell back to auto-layout.
+    // Reconciling local and server layouts.
+    //
+    // Filling only the GAPS (the previous behaviour) silently produced a hybrid:
+    // a stale localStorage layout won for every node it knew about while new
+    // nodes came from the server, so the diagram was half one arrangement and
+    // half another - "many things moved".
+    //
+    // The server copy is the shared, durable one, so it wins unless this browser
+    // has genuinely newer work. localStorage is only preferred when it was
+    // written after the last server sync from THIS browser.
     if (topoData.positions && topoData.positions.length) {
+      const srv = {};
       topoData.positions.forEach(function (p) {
-        if (!nodePos[p.key] && isFinite(p.x) && isFinite(p.y)) {
-          nodePos[p.key] = { x: p.x, y: p.y };
-        }
+        if (isFinite(p.x) && isFinite(p.y)) srv[p.key] = { x: p.x, y: p.y };
       });
+
+      const localAt  = Date.parse(localStorage.getItem('healthNodePosAt') || '') || 0;
+      const syncedAt = Date.parse(localStorage.getItem('healthNodePosSyncedAt') || '') || 0;
+      const localIsNewer = localAt > syncedAt;
+
+      if (localIsNewer && Object.keys(nodePos).length) {
+        // Unsaved local edits: keep them, but adopt server entries for anything
+        // this browser has never placed.
+        Object.keys(srv).forEach(function (k) {
+          if (!nodePos[k]) nodePos[k] = srv[k];
+        });
+      } else {
+        // Server is authoritative - take it wholesale rather than interleaving.
+        nodePos = srv;
+        localStorage.setItem('healthNodePos', JSON.stringify(nodePos));
+      }
+      localStorage.setItem('healthNodePosSyncedAt', new Date().toISOString());
     }
     renderHealth();
   } catch (e) {
