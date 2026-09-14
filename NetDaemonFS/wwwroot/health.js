@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 42;
+const HEALTH_JS_VERSION = 44;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -597,6 +597,11 @@ function renderDiagram() {
     // Output-off pip: the device is fine, its OUTPUT is switched off.
     const outPip = n.outputOn === false
       ? '<circle class="pip-off" cx="' + (p.x + w - 8) + '" cy="' + (p.y + h - 7) + '" r="3"/>' : '';
+    // Smart switches HA can actuate get an on/off control of their own.
+    const swMark = (n.switchable && !posText)
+      ? '<text class="n-sw n-click ' + (n.outputOn === false ? 'sw-off' : 'sw-on') +
+        '" data-act="switch" x="' + (p.x + w - 6) + '" y="' + (p.y + h - 4) + '">' +
+        (n.outputOn === false ? 'OFF' : 'ON') + '</text>' : '';
     const blind = n.blindSpot
       ? '<text class="n-blind" x="' + (p.x + w - 6) + '" y="' + (p.y + 11) + '">◍</text>' : '';
     const noteMark = n.note
@@ -626,9 +631,12 @@ function renderDiagram() {
     const posText = { on: 'ON', off: 'OFF', generator: 'GEN', line: 'LINE' }[n.position] || '';
     const posCls  = n.position === 'off' ? 'pos-off'
                   : n.position === 'line' ? 'pos-line' : 'pos-on';
+    // The badge is the control: click to cycle a breaker or transfer switch, or
+    // to actually operate a real smart switch. Saves opening the editor just to
+    // flip something.
     const posMark = posText
-      ? '<text class="n-pos ' + posCls + '" x="' + (p.x + w - 6) + '" y="' + (p.y + h - 4) + '">' +
-        posText + '</text>' : '';
+      ? '<text class="n-pos n-click ' + posCls + '" data-act="pos" x="' + (p.x + w - 6) +
+        '" y="' + (p.y + h - 4) + '">' + posText + '</text>' : '';
 
     return '<g class="n-g' + sel + '" data-key="' + n.key + '">' +
       '<title>' + esc(n.label) + ' - ' + esc(tip) + '</title>' +
@@ -638,7 +646,7 @@ function renderDiagram() {
       (n.size === 1 ? '' :
         '<text class="n-kind" x="' + (p.x + 23) + '" y="' + (p.y + 26) + '">' + esc(n.kind) + '</text>') +
       ifaceIcons(n, p.x + w - 6, p.y + 4, n.radioUp !== false) +
-      outPip + blind + noteMark + posMark + dualMark + wattMark + '</g>';
+      outPip + blind + noteMark + posMark + swMark + dualMark + wattMark + '</g>';
   }
 
   const vb = [minX + diagramPan.x, minY + diagramPan.y, W / diagramZoom, H / diagramZoom].join(' ');
@@ -659,7 +667,7 @@ function renderDiagram() {
       '<button id="btn-connect" class="' + (connectFrom ? 'on' : '') + '" ' +
         'title="Click this, then click two nodes to connect them">+ connection</button>' +
       '<span class="diag-hint">' +
-        (connectFrom ? 'click the PARENT (source) node…' : 'drag nodes or an area · double-click to edit · shift-click a line to flip · Ctrl+scroll to zoom') +
+        (connectFrom ? 'click the PARENT (source) node…' : 'drag nodes or an area · double-click to edit · click ON/OFF to switch · shift-click a line to flip') +
       '</span>' +
     '</div>' +
     '<svg id="diag-svg" viewBox="' + vb + '" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">' +
@@ -782,6 +790,12 @@ function openNodeEditor(key) {
       '<option value="2"' + (n.size === 2 ? ' selected' : '') + '>normal</option>' +
       '<option value="3"' + (n.size === 3 ? ' selected' : '') + '>large</option>' +
       '</select></label>' +
+    // Entities: which sensor reports draw, and which switch HA can actuate.
+    // Without these editable, a device you add yourself can never be switched.
+    '<label>Power sensor (W)<input id="ed-pent" value="' + esc(n.powerEntity || '') +
+      '" placeholder="sensor.xxx_power"></label>' +
+    '<label>Switch entity<input id="ed-oent" value="' + esc(n.outputEntity || '') +
+      '" placeholder="switch.xxx"></label>' +
     '<label>Notes<textarea id="ed-note" rows="3" placeholder="Quirks, how to recover it, what it is for...">' +
       esc(n.note || '') + '</textarea></label>' +
     '<div class="ed-meta">key: <code>' + esc(n.key) + '</code>' +
@@ -872,6 +886,8 @@ async function saveNodeEditor() {
     powerFrom: powerFrom,
     lan:       lan,
     position:  (document.getElementById('ed-pos') || {}).value || '',
+    powerEnt:  (document.getElementById('ed-pent') || {}).value || '',
+    outputEnt: (document.getElementById('ed-oent') || {}).value || '',
     feedMode:  (document.getElementById('ed-240') || {}).checked ? 'both' : 'selected',
     altFrom:   (document.getElementById('ed-alt') || {}).value || ''
   };
@@ -1027,6 +1043,32 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H, originX, originY) {
   }
 
   svg.addEventListener('click', function (evt) {
+    // Badge clicks: cycle a modelled position, or operate a real smart switch.
+    const ctl = evt.target.closest ? evt.target.closest('.n-click') : null;
+    if (ctl) {
+      const g = ctl.closest('.n-g');
+      const n = byKey.get(g.dataset.key);
+      evt.preventDefault();
+      evt.stopPropagation();
+      if (ctl.dataset.act === 'switch') {
+        const turnOn = n.outputOn === false;
+        if (!confirm((turnOn ? 'Turn ON ' : 'Turn OFF ') + n.label + '?')) return;
+        api('POST', '/api/health/switch', { key: n.key, on: turnOn })
+          .then(function () { setTimeout(loadHealth, 1200); })
+          .catch(function (e) { alert('Could not switch: ' + e.message); });
+      } else {
+        // Breaker: on <-> off. Transfer switch: generator -> off -> line.
+        const cycle = n.kind === 'triple-switch'
+          ? { generator: 'off', off: 'line', line: 'generator' }
+          : { on: 'off', off: 'on' };
+        const next = cycle[n.position] || (n.kind === 'triple-switch' ? 'generator' : 'on');
+        api('POST', '/api/health/node', { nodeKey: n.key, position: next })
+          .then(loadHealth)
+          .catch(function (e) { alert('Could not set position: ' + e.message); });
+      }
+      return;
+    }
+
     // Shift-click flips an edge's routing; alt-click returns it to automatic.
     const path = evt.target.closest ? evt.target.closest('#diag-edges path') : null;
     if (path && (evt.shiftKey || evt.altKey)) {

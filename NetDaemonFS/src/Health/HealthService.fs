@@ -378,6 +378,24 @@ type HealthService
         |> Seq.filter (fun e -> e.StartsWith prefix && not (e.EndsWith "_daily_energy"))
         |> Seq.tryHead
 
+    /// Operate a real smart switch. Returns the entity acted on, or why not.
+    member this.OperateSwitch(key: string, turnOn: bool) : Result<string, string> =
+        let node = this.GetNodes() |> List.tryFind (fun n -> n.key = key)
+        match node with
+        | None -> Result.Error ("unknown node: " + key)
+        | Some n ->
+            match n.outputEntity with
+            | Some e when e.StartsWith "switch." ->
+                // A breaker or transfer-switch POSITION is recorded, not actuated;
+                // only a real switch entity can be operated.
+                let ent = NetDaemon.HassModel.Entities.Entity(ha, e)
+                ent.CallService(if turnOn then "turn_on" else "turn_off")
+                log.LogInformation("Health: {Action} {Entity} (node {Key})",
+                                   (if turnOn then "turned on" else "turned off"), e, key)
+                Result.Ok e
+            | Some e -> Result.Error (e + " is not a switch entity")
+            | None   -> Result.Error (key + " has no output entity to switch")
+
     member _.GetNotes() : Map<string, string> =
         try use c = openDb () in Store.loadNotes c
         with _ -> Map.empty

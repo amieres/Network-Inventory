@@ -206,6 +206,14 @@ let private getTopology (svc: HealthService) : HttpHandler =
                    position  = n.position.label
                    feedMode  = n.feedMode.label
                    watts     = powerOf n
+                   // True when HA can really switch this node, as opposed to a
+                   // breaker/transfer-switch position that is only recorded.
+                   outputEntity = n.outputEntity
+                   powerEntity  = n.powerEntity
+                   switchable =
+                     n.outputEntity
+                     |> Option.map (fun e -> e.StartsWith "switch.")
+                     |> Option.defaultValue false
                    lan       = n.lan.label
                    // One entry per physical interface, straight from the
                    // inventory - the topology does not re-declare MACs or IPs.
@@ -310,6 +318,7 @@ type OverrideDto = {
     position  : string
     feedMode  : string
     powerEnt  : string
+    outputEnt : string
 }
 
 let private saveNode (svc: HealthService) : HttpHandler =
@@ -332,7 +341,8 @@ let private saveNode (svc: HealthService) : HttpHandler =
                   altFrom   = opt dto.altFrom
                   position  = opt dto.position
                   feedMode  = opt dto.feedMode
-                  powerEnt  = opt dto.powerEnt }
+                  powerEnt  = opt dto.powerEnt
+                  outputEnt = opt dto.outputEnt }
             return! Response.ofJson {| ok = true |} ctx
     }
 
@@ -386,6 +396,25 @@ let private addNode (svc: HealthService) : HttpHandler =
 
 [<CLIMutable>]
 type KeyDto = { key : string }
+
+[<CLIMutable>]
+type SwitchDto = { key : string; on : bool }
+
+/// Turn a real smart switch on or off. Only nodes that declare an
+/// `outputEntity` in the switch domain can be operated - everything else is a
+/// modelled position, not something HA can actuate.
+let private operateSwitch (svc: HealthService) : HttpHandler =
+    fun ctx -> task {
+        try
+            let! dto = Request.getJson<SwitchDto> ctx
+            match svc.OperateSwitch(dto.key, dto.on) with
+            | Result.Ok entity ->
+                return! Response.ofJson {| ok = true; entity = entity |} ctx
+            | Result.Error msg ->
+                return! (Response.withStatusCode 400 >> Response.ofJson {| error = msg |}) ctx
+        with ex ->
+            return! (Response.withStatusCode 400 >> Response.ofJson {| error = ex.Message |}) ctx
+    }
 
 [<CLIMutable>]
 type RenameDto = { oldKey : string; newKey : string }
@@ -463,4 +492,5 @@ let routes (svc: HealthService) : HttpEndpoint list = [
     post "/api/health/node/del"  (deleteNode    svc)
     post "/api/health/note"      (saveNote      svc)
     post "/api/health/node/rename" (renameNode  svc)
+    post "/api/health/switch"      (operateSwitch svc)
 ]

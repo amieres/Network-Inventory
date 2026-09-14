@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS health_node_pos (
     cmd.ExecuteNonQuery() |> ignore
 
     // Columns added after the first release.
-    for col, decl in [ "power_from", "TEXT"; "lan", "TEXT"; "alt_from", "TEXT"; "position", "TEXT"; "feed_mode", "TEXT"; "power_ent", "TEXT" ] do
+    for col, decl in [ "power_from", "TEXT"; "lan", "TEXT"; "alt_from", "TEXT"; "position", "TEXT"; "feed_mode", "TEXT"; "power_ent", "TEXT"; "output_ent", "TEXT" ] do
         use chk = conn.CreateCommand()
         chk.CommandText <- $"SELECT COUNT(*) FROM pragma_table_info('health_node_overrides') WHERE name = '{col}'"
         if (chk.ExecuteScalar() :?> int64) = 0L then
@@ -135,6 +135,7 @@ type Override = {
     position  : string option
     feedMode  : string option
     powerEnt  : string option
+    outputEnt : string option
 }
 
 let private readOpt (r: SqliteDataReader) (i: int) =
@@ -142,7 +143,7 @@ let private readOpt (r: SqliteDataReader) (i: int) =
 
 let loadOverrides (conn: SqliteConnection) : Map<string, Override> =
     use cmd = conn.CreateCommand()
-    cmd.CommandText <- "SELECT node_key, label, area, link, size, ac_input, kind, power_from, lan, alt_from, position, feed_mode, power_ent FROM health_node_overrides"
+    cmd.CommandText <- "SELECT node_key, label, area, link, size, ac_input, kind, power_from, lan, alt_from, position, feed_mode, power_ent, output_ent FROM health_node_overrides"
     use r = cmd.ExecuteReader()
     let acc = ResizeArray()
     while r.Read() do
@@ -160,7 +161,8 @@ let loadOverrides (conn: SqliteConnection) : Map<string, Override> =
               altFrom   = readOpt r 9
               position  = readOpt r 10
               feedMode  = readOpt r 11
-              powerEnt  = readOpt r 12 })
+              powerEnt  = readOpt r 12
+              outputEnt = readOpt r 13 })
     acc |> Map.ofSeq
 
 let saveOverride (conn: SqliteConnection) (o: Override) =
@@ -184,16 +186,17 @@ let saveOverride (conn: SqliteConnection) (o: Override) =
             position  = keep o.position  (fun e -> e.position)
             feedMode  = keep o.feedMode  (fun e -> e.feedMode)
             powerEnt  = keep o.powerEnt  (fun e -> e.powerEnt)
+            outputEnt = keep o.outputEnt (fun e -> e.outputEnt)
             size      = (match o.size with Some v -> Some v | None -> existing |> Option.bind (fun e -> e.size)) }
     use cmd = conn.CreateCommand()
     cmd.CommandText <- """
-INSERT INTO health_node_overrides (node_key, label, area, link, size, ac_input, kind, power_from, lan, alt_from, position, feed_mode, power_ent, updated_at)
-VALUES ($k, $label, $area, $link, $size, $ac, $kind, $pf, $lan, $alt, $pos, $feed, $pent, $now)
+INSERT INTO health_node_overrides (node_key, label, area, link, size, ac_input, kind, power_from, lan, alt_from, position, feed_mode, power_ent, output_ent, updated_at)
+VALUES ($k, $label, $area, $link, $size, $ac, $kind, $pf, $lan, $alt, $pos, $feed, $pent, $oent, $now)
 ON CONFLICT(node_key) DO UPDATE SET
     label = $label, area = $area, link = $link,
     size = $size, ac_input = $ac, kind = $kind,
     power_from = $pf, lan = $lan, alt_from = $alt, position = $pos,
-    feed_mode = $feed, power_ent = $pent, updated_at = $now"""
+    feed_mode = $feed, power_ent = $pent, output_ent = $oent, updated_at = $now"""
     cmd.Parameters.AddWithValue("$k", o.nodeKey) |> ignore
     cmd.Parameters.AddWithValue("$label", dbv o.label) |> ignore
     cmd.Parameters.AddWithValue("$area",  dbv o.area)  |> ignore
@@ -207,6 +210,7 @@ ON CONFLICT(node_key) DO UPDATE SET
     cmd.Parameters.AddWithValue("$pos", dbv o.position) |> ignore
     cmd.Parameters.AddWithValue("$feed", dbv o.feedMode) |> ignore
     cmd.Parameters.AddWithValue("$pent", dbv o.powerEnt) |> ignore
+    cmd.Parameters.AddWithValue("$oent", dbv o.outputEnt) |> ignore
     cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString "o") |> ignore
     cmd.ExecuteNonQuery() |> ignore
 
@@ -231,7 +235,8 @@ let applyOverrides (overrides: Map<string, Override>) (n: Node) : Node =
             altFrom   = (nonEmpty o.altFrom  |> Option.bind parsePower |> Option.defaultValue n.altFrom)
             position  = (nonEmpty o.position |> Option.bind parsePos   |> Option.defaultValue n.position)
             feedMode  = (nonEmpty o.feedMode |> Option.bind parseFeed  |> Option.defaultValue n.feedMode)
-            powerEntity = (nonEmpty o.powerEnt |> Option.orElse n.powerEntity) }
+            powerEntity  = (nonEmpty o.powerEnt  |> Option.orElse n.powerEntity)
+            outputEntity = (nonEmpty o.outputEnt |> Option.orElse n.outputEntity) }
 
 // ── Notes ────────────────────────────────────────────────────────────────────
 
