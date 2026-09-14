@@ -134,6 +134,24 @@ let private getTopology (svc: HealthService) : HttpHandler =
         // device with both ethernet and wifi (the Mac Studio) shows both, each
         // with its own MAC and IP, and a BLE-capable device gets a bluetooth icon.
         let deviceIfaces = svc.GetDeviceIfaces()
+        // Live AC draw per node. AbeVue2 circuit sensors are numbered by BREAKER,
+        // so a breaker node resolves its own sensor automatically. Units are
+        // mixed (some W, some kW), so normalise to watts.
+        let powerOf (n: Node) : float option =
+            let fromEntity (e: string) =
+                match svc.GetPowerReading e with
+                | Some (v, unit) ->
+                    let w = if unit = "kW" then v * 1000.0 else v
+                    Some w
+                | None -> None
+            match n.powerEntity with
+            | Some e -> fromEntity e
+            | None ->
+                // Breakers: match sensor.abevue2_<n>_* by number.
+                if n.key.StartsWith "breaker_" then
+                    let num = n.key.Substring 8
+                    svc.FindVuePower num |> Option.bind (fun e -> fromEntity e)
+                else None
         let notes = svc.GetNotes()
 
         // A node has no power when an ancestor power-edge parent is faulted, or
@@ -187,6 +205,7 @@ let private getTopology (svc: HealthService) : HttpHandler =
                    altFrom   = n.altFrom.label
                    position  = n.position.label
                    feedMode  = n.feedMode.label
+                   watts     = powerOf n
                    lan       = n.lan.label
                    // One entry per physical interface, straight from the
                    // inventory - the topology does not re-declare MACs or IPs.
@@ -290,6 +309,7 @@ type OverrideDto = {
     altFrom   : string
     position  : string
     feedMode  : string
+    powerEnt  : string
 }
 
 let private saveNode (svc: HealthService) : HttpHandler =
@@ -311,7 +331,8 @@ let private saveNode (svc: HealthService) : HttpHandler =
                   lan       = opt dto.lan
                   altFrom   = opt dto.altFrom
                   position  = opt dto.position
-                  feedMode  = opt dto.feedMode }
+                  feedMode  = opt dto.feedMode
+                  powerEnt  = opt dto.powerEnt }
             return! Response.ofJson {| ok = true |} ctx
     }
 

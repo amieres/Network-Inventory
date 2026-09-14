@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 37;
+const HEALTH_JS_VERSION = 38;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -331,6 +331,12 @@ function iconFor(kind, x, y, dim) {
 // ethernet and wifi (the Mac Studio) gets two icons with different MACs and IPs,
 // and a BLE-capable device gets a bluetooth icon alongside. Tooltips carry the
 // MAC and IP so the diagram ties back to the inventory entry.
+// Watts render left of the ON/OFF badge so the two never collide.
+function w2offset(n) {
+  const w = n.size === 1 ? 120 : n.size === 3 ? 190 : 155;
+  return w - (n.position ? 34 : 6);
+}
+
 function ifaceGlyph(kind, c) {
   if (kind === 'wifi') {
     return '<path d="M0 4a6 6 0 0 1 8 0"/><path d="M2 6.2a3 3 0 0 1 4 0"/>' +
@@ -553,6 +559,7 @@ function renderDiagram() {
     if (n.outputOn === false) tip += ' | output OFF';
     if (n.position && n.position !== 'on') tip += ' | position: ' + n.position;
     if (n.feedMode === 'both') tip += ' | 240 V: needs both legs';
+    if (n.watts != null) tip += ' | drawing ' + n.watts.toFixed(1) + ' W';
     if (n.remedy)             tip += ' | ' + n.remedy;
     if (n.note)               tip += '\n' + n.note;
 
@@ -569,6 +576,18 @@ function renderDiagram() {
       ? '<text class="n-note" x="' + (p.x + 6) + '" y="' + (p.y + h - 3) + '">✎</text>' : '';
     const dualMark = n.feedMode === 'both'
       ? '<text class="n-dual" x="' + (p.x + w - 6) + '" y="' + (p.y + 11) + '">240V</text>' : '';
+    // Live AC draw. A plug that is ON but pulling ~0 W usually means whatever is
+    // plugged into it has died, which no connectivity check would reveal.
+    const watts = n.watts;
+    const wattText = (watts == null) ? ''
+      : watts >= 1000 ? (watts / 1000).toFixed(2) + ' kW'
+      : watts >= 10   ? watts.toFixed(0) + ' W'
+      : watts >= 0.5  ? watts.toFixed(1) + ' W'
+      : '0 W';
+    const wattCls = (watts == null) ? '' : (watts < 0.5 ? 'w-zero' : 'w-live');
+    const wattMark = wattText
+      ? '<text class="n-watt ' + wattCls + '" x="' + (p.x + w2offset(n)) + '" y="' + (p.y + h - 4) + '">' +
+        wattText + '</text>' : '';
     const posText = { on: 'ON', off: 'OFF', generator: 'GEN', line: 'LINE' }[n.position] || '';
     const posCls  = n.position === 'off' ? 'pos-off'
                   : n.position === 'line' ? 'pos-line' : 'pos-on';
@@ -584,7 +603,7 @@ function renderDiagram() {
       (n.size === 1 ? '' :
         '<text class="n-kind" x="' + (p.x + 23) + '" y="' + (p.y + 26) + '">' + esc(n.kind) + '</text>') +
       ifaceIcons(n, p.x + w - 6, p.y + 4, n.radioUp !== false) +
-      outPip + blind + noteMark + posMark + dualMark + '</g>';
+      outPip + blind + noteMark + posMark + dualMark + wattMark + '</g>';
   }
 
   const vb = [minX + diagramPan.x, minY + diagramPan.y, W / diagramZoom, H / diagramZoom].join(' ');

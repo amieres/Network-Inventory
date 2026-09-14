@@ -81,6 +81,10 @@ type Node = {
     altFrom  : PowerSource
     /// How `powerFrom` and `altFrom` combine.
     feedMode : FeedMode
+    /// Entity reporting this node's AC power draw, in W. Shown on the diagram so
+    /// you can see what is actually RUNNING, not merely connected - a plug that
+    /// is on but drawing 0 W usually means the thing plugged into it is dead.
+    powerEntity : string option
     /// Position of a switchable device:
     ///   breaker       -> On | Off
     ///   triple switch -> Generator | Off | Line
@@ -166,7 +170,8 @@ module Topology =
           outputEntity = None; link = None; size = 2
           powerFrom = PowerUnknown; lan = NoLan
           btHost = None; needsInternet = false; wanFrom = None
-          altFrom = PowerUnknown; position = PosUnset; feedMode = Selected }
+          altFrom = PowerUnknown; position = PosUnset; feedMode = Selected
+          powerEntity = None }
 
     let nodes : Node list = [
         // ── Power sources ────────────────────────────────────────────────────
@@ -191,19 +196,22 @@ module Topology =
                   outputEntity = Some "sensor.ac500_ac_output_power"
                   area = Some "Garage"; link = Some "ABEWNETG"; size = 3
                   powerFrom = FromDevice "grid"; lan = Wifi "ABEWNETG"
-                  btHost = Some "raspi4" }
+                  btHost = Some "raspi4"
+                  powerEntity = Some "sensor.ac500_ac_output_power" }
         yield { node "ac500_2" "BLUETTI AC500 #2" "battery" with
                   device = Some "BLUETTI AC500 #2"; entity = Some "binary_sensor.ac500_connected_2"
                   outputEntity = Some "sensor.ac500_ac_output_power_2"
                   area = Some "Garage"; link = Some "ABEWNETG"; size = 3
                   powerFrom = PowerUnknown; lan = Wifi "ABEWNETG"
-                  btHost = Some "raspi4" }
+                  btHost = Some "raspi4"
+                  powerEntity = Some "sensor.ac500_ac_output_power_2" }
         yield { node "ac200m" "BLUETTI AC200M" "battery" with
                   device = Some "BLUETTI AC200M"; entity = Some "binary_sensor.ac200m_connected"
                   outputEntity = Some "sensor.ac200m_ac_output_power"
                   area = Some "Garage"; size = 3
                   powerFrom = PowerUnknown; lan = NoLan
-                  btHost = Some "raspi4" }
+                  btHost = Some "raspi4"
+                  powerEntity = Some "sensor.ac200m_ac_output_power" }
 
         // ── Manual transfer switch circuits ──────────────────────────────────
         // A C E G H default to AC500 #1, B D F I to AC500 #2 - but every circuit
@@ -232,12 +240,14 @@ module Topology =
         yield { node "kauf_xx" "Kauf_XX (PLF12)" "plug" with
                   device = Some "Kauf_XX (PLF12)"; entity = Some "switch.kauf_xx"
                   outputEntity = Some "switch.kauf_xx"; link = Some "ABEWNETG"; size = 1
-                  powerFrom = FromDevice "ac500_2"; lan = Wifi "ABEWNETG" }
+                  powerFrom = FromDevice "ac500_2"; lan = Wifi "ABEWNETG"
+                  powerEntity = Some "sensor.kauf_plug_power_2" }
         yield { node "shelly_us" "Shelly Plug US" "plug" with
                   device = Some "Shelly Plug US"; entity = Some "switch.shellyplugus_048308deba94"
                   outputEntity = Some "switch.shellyplugus_048308deba94"
                   area = Some "Garage"; link = Some "ABEWNETG"; size = 1
-                  powerFrom = FromArea "Garage"; lan = Wifi "ABEWNETG" }
+                  powerFrom = FromArea "Garage"; lan = Wifi "ABEWNETG"
+                  powerEntity = Some "sensor.shellyplugus_048308deba94_power" }
 
         // ── Compute ─────────────────────────────────────────────────────────
         yield { node "raspi4" "AbeRaspi4" "pi" with

@@ -351,6 +351,33 @@ type HealthService
         Store.migrate c
         Store.addCustomNode c key label kind area device entity powerFrom lan size
 
+    /// Value + unit for a power sensor, so the caller can normalise kW to W.
+    member _.GetPowerReading(entityId: string) : (float * string) option =
+        match ha.GetState entityId with
+        | null -> None
+        | st ->
+            match Double.TryParse(st.State, Globalization.NumberStyles.Float,
+                                  Globalization.CultureInfo.InvariantCulture) with
+            | true, v ->
+                let unit =
+                    match st.Attributes with
+                    | null -> "W"
+                    | attrs ->
+                        match attrs.TryGetValue "unit_of_measurement" with
+                        | true, u when not (isNull u) -> string u
+                        | _ -> "W"
+                Some (v, unit)
+            | _ -> None
+
+    /// AbeVue2 names its circuit sensors by BREAKER number
+    /// (sensor.abevue2_<n>_<description>), so a breaker node can find its own.
+    member _.FindVuePower(breakerNum: string) : string option =
+        let prefix = "sensor.abevue2_" + breakerNum + "_"
+        ha.GetAllEntities()
+        |> Seq.map (fun e -> e.EntityId)
+        |> Seq.filter (fun e -> e.StartsWith prefix && not (e.EndsWith "_daily_energy"))
+        |> Seq.tryHead
+
     member _.GetNotes() : Map<string, string> =
         try use c = openDb () in Store.loadNotes c
         with _ -> Map.empty
