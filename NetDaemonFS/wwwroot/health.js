@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 40;
+const HEALTH_JS_VERSION = 42;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -455,9 +455,8 @@ function renderDiagram() {
   const boxW = function (n) { return n.size === 1 ? 120 : n.size === 3 ? 190 : 155; };
   const boxH = function (n) {
     const base = n.size === 1 ? 26 : n.size === 3 ? 40 : 32;
-    // Watts render on their own line, so give the box room rather than letting
-    // the text spill out of the bottom.
-    return (n.watts != null && n.size === 1) ? base + 10 : base;
+    // Small nodes have no kind line, so watts need a little room of their own.
+    return (n.watts != null && n.size === 1) ? base + 8 : base;
   };
 
   const pos = new Map();
@@ -615,9 +614,15 @@ function renderDiagram() {
     const wattCls = (watts == null) ? '' : (watts < 0.5 ? 'w-zero' : 'w-live');
     // Left-aligned under the label, on its own baseline - the badge owns the
     // bottom-right corner, so sharing it meant guessing the badge's width.
+    // Right-aligned on the KIND line. Sharing the label's bottom baseline put
+    // watts 2px under the kind text - i.e. drawn straight through it.
+    // The bottom line holds: kind word (left), watts (middle), badge (right).
+    // Right-aligning watts put them under the badge; left-aligning put them
+    // under the kind word. Anchor them to the middle instead, which is empty.
+    const wattX = p.x + w - (n.position ? 40 : 10);
     const wattMark = wattText
-      ? '<text class="n-watt ' + wattCls + '" x="' + (p.x + 23) + '" y="' + (p.y + h - 4) + '">' +
-        wattText + '</text>' : '';
+      ? '<text class="n-watt ' + wattCls + '" x="' + wattX + '" y="' +
+        (p.y + (n.size === 1 ? h - 5 : 26)) + '">' + wattText + '</text>' : '';
     const posText = { on: 'ON', off: 'OFF', generator: 'GEN', line: 'LINE' }[n.position] || '';
     const posCls  = n.position === 'off' ? 'pos-off'
                   : n.position === 'line' ? 'pos-line' : 'pos-on';
