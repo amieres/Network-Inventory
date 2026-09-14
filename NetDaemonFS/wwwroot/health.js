@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 39;
+const HEALTH_JS_VERSION = 40;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -360,12 +360,6 @@ function iconFor(kind, x, y, dim) {
 // ethernet and wifi (the Mac Studio) gets two icons with different MACs and IPs,
 // and a BLE-capable device gets a bluetooth icon alongside. Tooltips carry the
 // MAC and IP so the diagram ties back to the inventory entry.
-// Watts render left of the ON/OFF badge so the two never collide.
-function w2offset(n) {
-  const w = n.size === 1 ? 120 : n.size === 3 ? 190 : 155;
-  return w - (n.position ? 34 : 6);
-}
-
 function ifaceGlyph(kind, c) {
   if (kind === 'wifi') {
     return '<path d="M0 4a6 6 0 0 1 8 0"/><path d="M2 6.2a3 3 0 0 1 4 0"/>' +
@@ -459,7 +453,12 @@ function renderDiagram() {
   const COL_W = 210, ROW_H = 54, PAD = 24;
   // Box size scales with node.size (1 small / 2 normal / 3 large).
   const boxW = function (n) { return n.size === 1 ? 120 : n.size === 3 ? 190 : 155; };
-  const boxH = function (n) { return n.size === 1 ? 26  : n.size === 3 ? 40  : 32; };
+  const boxH = function (n) {
+    const base = n.size === 1 ? 26 : n.size === 3 ? 40 : 32;
+    // Watts render on their own line, so give the box room rather than letting
+    // the text spill out of the bottom.
+    return (n.watts != null && n.size === 1) ? base + 10 : base;
+  };
 
   const pos = new Map();
   byDepth.forEach(function (list, dp) {
@@ -614,8 +613,10 @@ function renderDiagram() {
       : watts >= 0.5  ? watts.toFixed(1) + ' W'
       : '0 W';
     const wattCls = (watts == null) ? '' : (watts < 0.5 ? 'w-zero' : 'w-live');
+    // Left-aligned under the label, on its own baseline - the badge owns the
+    // bottom-right corner, so sharing it meant guessing the badge's width.
     const wattMark = wattText
-      ? '<text class="n-watt ' + wattCls + '" x="' + (p.x + w2offset(n)) + '" y="' + (p.y + h - 4) + '">' +
+      ? '<text class="n-watt ' + wattCls + '" x="' + (p.x + 23) + '" y="' + (p.y + h - 4) + '">' +
         wattText + '</text>' : '';
     const posText = { on: 'ON', off: 'OFF', generator: 'GEN', line: 'LINE' }[n.position] || '';
     const posCls  = n.position === 'off' ? 'pos-off'
