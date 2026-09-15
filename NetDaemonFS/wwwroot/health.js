@@ -6,7 +6,7 @@
 // Loaded as a separate file from app.js so the inventory view keeps working
 // even if this one throws.
 
-const HEALTH_JS_VERSION = 44;
+const HEALTH_JS_VERSION = 65;
 
 let healthData   = null;   // /api/health/devices
 let topoData     = null;   // /api/health/topology
@@ -205,11 +205,28 @@ function renderHealth() {
     banner.className = 'h-banner bad compact';
     let html = '';
     roots.forEach(function (r) {
+      const node = ((topoData && topoData.nodes) || [])
+        .find(function (x) { return x.key === r.key; }) || {};
+      const dx = node.diagnosis || [];
+      const top = dx[0];
+      const alts = dx.slice(1).filter(function (x) { return x.score >= (top ? top.score : 0); });
       html += '<div class="h-root">Root cause: <code>' + esc(r.label) + '</code>' +
+              (top ? ' — likely <b>' + esc(top.cause) + '</b>' : '') +
+              (alts.length
+                 ? ' <span class="h-alt">(or ' +
+                   alts.map(function (x) { return esc(x.cause); }).join(', ') + ')</span>'
+                 : '') +
               (r.affected.length
                  ? ' — explains ' + r.affected.length + ': ' + esc(r.affected.join(', '))
                  : '') +
-              (r.remedy ? '<div class="h-remedy">→ ' + esc(r.remedy) + '</div>' : '') +
+              (top && top.why && top.why.length
+                 ? '<ul class="h-why">' +
+                   top.why.map(function (w) { return '<li>' + esc(w) + '</li>'; }).join('') +
+                   '</ul>'
+                 : '') +
+              ((top && top.remedy) || r.remedy
+                 ? '<div class="h-remedy">→ ' + esc((top && top.remedy) || r.remedy) + '</div>'
+                 : '') +
               '</div>';
     });
     banner.innerHTML = html;
@@ -335,6 +352,9 @@ function iconFor(kind, x, y, dim) {
   switch (kind) {
     case 'grid':     return g('<path d="M5 0 L2 6 h4 L3 12"/><path d="M9 1 v10 M11 3 v6"/>');
     case 'battery':  return g('<rect x="1" y="3" width="10" height="7" rx="1"/><path d="M12 5.5v2"/><path d="M3.5 5.5h3"/>');
+    case 'power-station':
+      return g('<rect x="1" y="2.5" width="9" height="8" rx="1"/><path d="M11 5v3"/>' +
+               '<path d="M3 5.5h2.5"/><path d="M4.25 4.25v2.5"/><path d="M7 8.5h1.5"/>');
     case 'plug':     return g('<path d="M4 1v3 M8 1v3"/><rect x="2" y="4" width="8" height="4" rx="1"/><path d="M6 8v3"/>');
     case 'camera':   return g('<rect x="1" y="3" width="8" height="7" rx="1"/><path d="M9 6l3-2v6l-3-2"/>');
     case 'ap':       return g('<path d="M1 5a7 7 0 0 1 10 0"/><path d="M3.5 7.5a3.5 3.5 0 0 1 5 0"/><circle cx="6" cy="10" r="1"/>');
@@ -407,7 +427,12 @@ function ifaceIcons(n, rightX, y, up) {
     const tip = label +
                 (f.ip  ? ' — ' + f.ip  : '') +
                 (f.mac ? ' — ' + f.mac : '') +
-                (f.conn ? ' (' + f.conn + ')' : '');
+                (function () {
+                  if (!f.conn) return '';
+                  const saysWired = f.conn.indexOf('Wired') >= 0;
+                  const isWired = f.kind === 'ethernet' || f.kind === 'wired';
+                  return saysWired !== isWired ? '' : ' (' + f.conn + ')';
+                })();
     // Lay the icons out right-to-left so the box label is never overlapped.
     const x = rightX - 12 - idx * 13;
     return '<g class="lan-icon" transform="translate(' + x + ',' + y + ')" fill="none" stroke="' + c +
@@ -569,41 +594,89 @@ function renderDiagram() {
            (e.user ? '; click to remove' : '') + '</title></path>';
   }
 
+  // Real text metrics. Character-count estimates kept either running the label
+  // into the right-hand badge or over-truncating it ("Internet (WAN)" -> "Inte…"),
+  // because the label font is proportional and the kind renders 2px smaller.
+  const _measureCtx = document.createElement('canvas').getContext('2d');
+  const _measureCache = new Map();
+  function textWidth(text, font) {
+    const k = font + '|' + text;
+    let v = _measureCache.get(k);
+    if (v === undefined) {
+      _measureCtx.font = font;
+      v = _measureCtx.measureText(text).width;
+      _measureCache.set(k, v);
+    }
+    return v;
+  }
+  const LABEL_FONT = "600 11px 'Segoe UI', sans-serif";
+  const KIND_FONT  = "9px 'Segoe UI', sans-serif";
+  // Trim a label to fit the pixels available, adding an ellipsis if it had to cut.
+  function fitLabel(text, avail) {
+    if (textWidth(text, LABEL_FONT) <= avail) return text;
+    let lo = 0, hi = text.length;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (textWidth(text.slice(0, mid) + '…', LABEL_FONT) <= avail) lo = mid; else hi = mid - 1;
+    }
+    return lo > 0 ? text.slice(0, lo) + '…' : '';
+  }
+
   function nodeGroup(n) {
     const p = pos.get(n.key);
     const w = boxW(n), h = boxH(n);
     // No power => greyed out entirely. Radio down => only the link icon greys.
     const noPower = n.powered === false || n.position === 'off';
+    const isRoot  = n.kind === 'grid' || n.kind === 'internet' ||
+                    n.kind === 'battery' || n.kind === 'power-station';
+    const noSource = !isRoot && !n.powerFrom && !n.altFrom;
     const cls = noPower                     ? 'n-dead'
               : n.verdict === 'root-cause'  ? 'n-fault'
               : n.verdict === 'suppressed'  ? 'n-sup'
+              : noSource                    ? 'n-nosrc'
               : 'n-ok';
     let tip;
     if (noPower)                         tip = 'NO POWER';
     else if (n.verdict === 'suppressed') tip = 'suppressed - because ' + n.because;
     else if (n.verdict === 'root-cause') tip = 'ROOT CAUSE' + (n.affected.length ? ' - affects ' + n.affected.join(', ') : '');
+    else if (noSource)                   tip = 'no power source defined';
     else                                 tip = 'healthy';
     if (n.outputOn === false) tip += ' | output OFF';
     if (n.position && n.position !== 'on') tip += ' | position: ' + n.position;
     if (n.feedMode === 'both') tip += ' | 240 V: needs both legs';
     if (n.watts != null) tip += ' | drawing ' + n.watts.toFixed(1) + ' W';
+    if (n.soc != null)   tip += ' | battery ' + Math.round(n.soc) + '%';
     if (n.remedy)             tip += ' | ' + n.remedy;
     if (n.note)               tip += '\n' + n.note;
 
-    const maxChars = n.size === 1 ? 14 : n.size === 3 ? 26 : 20;
-    const label = n.label.length > maxChars ? n.label.slice(0, maxChars - 1) + '…' : n.label;
+    // What will sit on the right of the box? Decided up here because the label
+    // has to be truncated around it - a flat maxChars ran long labels straight
+    // into the ON badge and the inline kind.
+    const posText = { on: 'ON', off: 'OFF', generator: 'GEN', line: 'LINE' }[n.position] || '';
+    // A cover reads OPEN/CLOSED; a switch reads ON/OFF. Deriving both from the
+    // raw state keeps the badge honest - a CLOSED garage door was showing "ON".
+    const isCover = (n.outputEntity || '').indexOf('cover.') === 0;
+    const swText = !n.switchable ? ''
+      : isCover ? (n.outputOn === false ? 'CLOSED' : 'OPEN')
+      : (n.outputOn === false ? 'OFF' : 'ON');
+    const badgeText = posText || swText;
+    // On a size-1 box the kind shares the single line, so it steals label room.
+    const inlineKind = (n.size === 1 && n.kind && n.watts == null && n.soc == null && !badgeText)
+      ? n.kind : '';
+    const socInline = (n.size === 1 && n.soc != null) ? Math.round(n.soc) + '%' : '';
+    const rightPx = n.size === 1
+      ? (badgeText ? textWidth(badgeText, KIND_FONT) + 8
+         : socInline ? textWidth(socInline, KIND_FONT) + 8
+         : inlineKind ? textWidth(inlineKind, KIND_FONT) + 8 : 0)
+      : 0;
+    const label = fitLabel(n.label, Math.max(12, w - 23 - 6 - rightPx));
     const sel = connectFrom === n.key ? ' connect-src' : '';
 
     // Output-off pip: the device is fine, its OUTPUT is switched off.
     const outPip = n.outputOn === false
       ? '<circle class="pip-off" cx="' + (p.x + w - 8) + '" cy="' + (p.y + h - 7) + '" r="3"/>' : '';
-    // Smart switches HA can actuate get an on/off control of their own.
-    const swMark = (n.switchable && !posText)
-      ? '<text class="n-sw n-click ' + (n.outputOn === false ? 'sw-off' : 'sw-on') +
-        '" data-act="switch" x="' + (p.x + w - 6) + '" y="' + (p.y + h - 4) + '">' +
-        (n.outputOn === false ? 'OFF' : 'ON') + '</text>' : '';
-    const blind = n.blindSpot
-      ? '<text class="n-blind" x="' + (p.x + w - 6) + '" y="' + (p.y + 11) + '">◍</text>' : '';
+
+
     const noteMark = n.note
       ? '<text class="n-note" x="' + (p.x + 6) + '" y="' + (p.y + h - 3) + '">✎</text>' : '';
     const dualMark = n.feedMode === 'both'
@@ -624,11 +697,28 @@ function renderDiagram() {
     // The bottom line holds: kind word (left), watts (middle), badge (right).
     // Right-aligning watts put them under the badge; left-aligning put them
     // under the kind word. Anchor them to the middle instead, which is empty.
-    const wattX = p.x + w - (n.position ? 40 : 10);
+    // badgeText/posText are computed above, where the label needs them.
+    const BADGE_FONT = "700 8px 'Segoe UI', sans-serif";
+    const badgeW = badgeText
+      ? textWidth(badgeText, BADGE_FONT) + badgeText.length * 0.32 + 1.2 : 0;
+    const WATT_OVERSHOOT = 4;   // end-anchored text still overruns its anchor
+    const wattX = p.x + w - (badgeText ? 6 + badgeW + WATT_OVERSHOOT + 5 : 8);
+    // State of charge. A station drops its AC output before shutting down, so a
+    // low SOC is the warning that everything downstream is about to go dark.
+    const socText = (n.soc == null) ? '' : Math.round(n.soc) + '%';
+    const socCls  = (n.soc == null) ? ''
+                  : n.soc <= 20 ? 'soc-low'
+                  : n.soc <= 40 ? 'soc-mid' : 'soc-ok';
+    const socMark = socText
+      ? (n.size === 1
+          ? '<text class="n-soc ' + socCls + ' k-inline" x="' + (p.x + w - 6) +
+            '" y="' + (p.y + 17) + '">' + socText + '</text>'
+          : '<text class="n-soc ' + socCls + '" x="' + (p.x + 23) +
+            '" y="' + (p.y + 26) + '">' + socText + '</text>')
+      : '';
     const wattMark = wattText
       ? '<text class="n-watt ' + wattCls + '" x="' + wattX + '" y="' +
         (p.y + (n.size === 1 ? h - 5 : 26)) + '">' + wattText + '</text>' : '';
-    const posText = { on: 'ON', off: 'OFF', generator: 'GEN', line: 'LINE' }[n.position] || '';
     const posCls  = n.position === 'off' ? 'pos-off'
                   : n.position === 'line' ? 'pos-line' : 'pos-on';
     // The badge is the control: click to cycle a breaker or transfer switch, or
@@ -637,16 +727,31 @@ function renderDiagram() {
     const posMark = posText
       ? '<text class="n-pos n-click ' + posCls + '" data-act="pos" x="' + (p.x + w - 6) +
         '" y="' + (p.y + h - 4) + '">' + posText + '</text>' : '';
+    // Smart switches HA can actuate get an on/off control of their own - but
+    // only when there is no position badge already occupying that corner.
+    // Declared AFTER posText: referencing it earlier was a temporal-dead-zone
+    // error that threw on every node and blanked the entire diagram.
+    const swMark = (n.switchable && !posText)
+      ? '<text class="n-sw n-click ' + (n.outputOn === false ? 'sw-off' : 'sw-on') +
+        '" data-act="switch" x="' + (p.x + w - 6) + '" y="' + (p.y + h - 4) + '">' +
+        swText + '</text>' : '';
+
+    // Size-1 boxes have no second line, so the kind used to be dropped entirely
+    // and small nodes showed no type. Draw it right-aligned on the one line we
+    // have - but only when watts/badge are not already using that corner.
+    const kindSmall = inlineKind
+      ? '<text class="n-kind k-inline" x="' + (p.x + w - 6) + '" y="' + (p.y + 17) + '">' +
+        esc(inlineKind) + '</text>' : '';
 
     return '<g class="n-g' + sel + '" data-key="' + n.key + '">' +
       '<title>' + esc(n.label) + ' - ' + esc(tip) + '</title>' +
       '<rect class="n-box ' + cls + '" x="' + p.x + '" y="' + p.y + '" width="' + w + '" height="' + h + '" rx="5"/>' +
       iconFor(n.kind, p.x + 6, p.y + (h - 12) / 2, noPower) +
       '<text class="n-label' + (noPower ? ' dim' : '') + '" x="' + (p.x + 23) + '" y="' + (p.y + (n.size === 1 ? 17 : 14)) + '">' + esc(label) + '</text>' +
-      (n.size === 1 ? '' :
+      (n.size === 1 ? kindSmall : socText ? '' :
         '<text class="n-kind" x="' + (p.x + 23) + '" y="' + (p.y + 26) + '">' + esc(n.kind) + '</text>') +
       ifaceIcons(n, p.x + w - 6, p.y + 4, n.radioUp !== false) +
-      outPip + blind + noteMark + posMark + swMark + dualMark + wattMark + '</g>';
+      outPip + noteMark + posMark + swMark + dualMark + wattMark + socMark + '</g>';
   }
 
   const vb = [minX + diagramPan.x, minY + diagramPan.y, W / diagramZoom, H / diagramZoom].join(' ');
@@ -796,6 +901,9 @@ function openNodeEditor(key) {
       '" placeholder="sensor.xxx_power"></label>' +
     '<label>Switch entity<input id="ed-oent" value="' + esc(n.outputEntity || '') +
       '" placeholder="switch.xxx"></label>' +
+    '<label>Inventory device<input id="ed-device" list="ed-device-list" value="' +
+      esc(n.device || '') + '" placeholder="exact inventory name (for MAC/IP)"></label>' +
+    '<datalist id="ed-device-list"></datalist>' +
     '<label>Notes<textarea id="ed-note" rows="3" placeholder="Quirks, how to recover it, what it is for...">' +
       esc(n.note || '') + '</textarea></label>' +
     '<div class="ed-meta">key: <code>' + esc(n.key) + '</code>' +
@@ -820,6 +928,24 @@ function openNodeEditor(key) {
       openNodeEditor(n.key);
     });
   }
+
+  // Fill the inventory-name datalist so the exact match required by the
+  // interface join is picked from a list rather than typed from memory.
+  (async function () {
+    const dl = document.getElementById('ed-device-list');
+    if (!dl) return;
+    try {
+      if (!window.__invNames) {
+        const r = await fetch('/api/devices');
+        const arr = await r.json();
+        window.__invNames = (Array.isArray(arr) ? arr : [])
+          .map(function (d) { return d.name; })
+          .filter(Boolean).sort();
+      }
+      dl.innerHTML = window.__invNames
+        .map(function (nm) { return '<option value="' + esc(nm) + '">'; }).join('');
+    } catch (e) { /* editor still works without suggestions */ }
+  })();
 
   const kindSel = document.getElementById('ed-kind');
   const kindNew = document.getElementById('ed-kind-new');
@@ -873,6 +999,7 @@ async function saveNodeEditor() {
 
   const body = {
     nodeKey: editingKey,
+    device: (document.getElementById('ed-device') || {}).value || '',
     label:   document.getElementById('ed-label').value.trim(),
     area:    newArea || document.getElementById('ed-area').value,
     link:    lan.indexOf('wifi:') === 0 ? lan.slice(5) : '',
@@ -997,15 +1124,14 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H, originX, originY) {
       if (icon) icon.setAttribute('transform', 'translate(' + (p.x + 6) + ',' + (p.y + (h - 12) / 2) + ')');
       const txts = g.querySelectorAll('text');
       let ti = 0;
-      if (txts[ti] && !txts[ti].classList.contains('n-blind')) {
+      if (txts[ti]) {
         txts[ti].setAttribute('x', p.x + 23);
         txts[ti].setAttribute('y', p.y + (n.size === 1 ? 17 : 14)); ti++;
       }
       if (txts[ti] && txts[ti].classList.contains('n-kind')) {
         txts[ti].setAttribute('x', p.x + 23); txts[ti].setAttribute('y', p.y + 26); ti++;
       }
-      const blindT = g.querySelector('.n-blind');
-      if (blindT) { blindT.setAttribute('x', p.x + w - 6); blindT.setAttribute('y', p.y + 11); }
+
       const pip = g.querySelector('.pip-off');
       if (pip) { pip.setAttribute('cx', p.x + w - 8); pip.setAttribute('cy', p.y + h - 7); }
     });
@@ -1052,7 +1178,11 @@ function wireDiagram(pos, byKey, boxW, boxH, W, H, originX, originY) {
       evt.stopPropagation();
       if (ctl.dataset.act === 'switch') {
         const turnOn = n.outputOn === false;
-        if (!confirm((turnOn ? 'Turn ON ' : 'Turn OFF ') + n.label + '?')) return;
+        const isCover = (n.outputEntity || '').indexOf('cover.') === 0;
+        const ask = isCover
+          ? (turnOn ? 'OPEN ' : 'CLOSE ') + n.label + '?'
+          : (turnOn ? 'Turn ON ' : 'Turn OFF ') + n.label + '?';
+        if (!confirm(ask)) return;
         api('POST', '/api/health/switch', { key: n.key, on: turnOn })
           .then(function () { setTimeout(loadHealth, 1200); })
           .catch(function (e) { alert('Could not switch: ' + e.message); });

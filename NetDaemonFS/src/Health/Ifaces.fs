@@ -33,7 +33,7 @@ let load (conn: SqliteConnection) : Map<string, Iface list> =
     use cmd = conn.CreateCommand()
     // Pair each address with the IP that the scanner saw on that same MAC.
     cmd.CommandText <- """
-SELECT d.name, a.addr_type, a.address, a.label, i.ip, i.conn_type
+SELECT d.name, a.addr_type, a.address, a.label, i.ip, i.conn_type, a.reserved_ip
 FROM   devices d
 -- Bluetooth addresses are included regardless of is_active: BLE devices rotate
 -- random MACs, so most bluetooth rows are marked inactive even when the device
@@ -52,7 +52,9 @@ WHERE  d.name IS NOT NULL"""
         // `iface` is stored in the addr LABEL column ('wifi' / 'ethernet'), not a
         // column of its own - see Inventory.Database.rowToAddr.
         let iface    = if r.IsDBNull 3 then None else Some (r.GetString 3)
-        let ip       = if r.IsDBNull 4 then None else Some (r.GetString 4)
+        let scannedIp = if r.IsDBNull 4 then None else Some (r.GetString 4)
+        let reserved  = if r.IsDBNull 6 then None else Some (r.GetString 6)
+        let ip        = match scannedIp with Some _ -> scannedIp | None -> reserved
         let connType = if r.IsDBNull 5 then None else Some (r.GetString 5)
         let kind =
             match addrType, iface with

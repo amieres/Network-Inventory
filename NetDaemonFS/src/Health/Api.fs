@@ -102,8 +102,11 @@ let private getTopology (svc: HealthService) : HttpHandler =
         let byName    = devHealth |> List.map (fun d -> d.name, d) |> Map.ofList
         let entHealth = svc.GetEntityHealth() |> List.map (fun e -> e.entityId, e.state) |> Map.ofList
 
+        let liveNodes = svc.GetNodes()
+        let liveNodeByKey = liveNodes |> List.map (fun n -> n.key, n) |> Map.ofList
+
         let isFaulted (key: string) =
-            match Topology.nodeByKey |> Map.tryFind key with
+            match liveNodeByKey |> Map.tryFind key with
             | None -> false
             | Some n ->
                 let byDevice =
@@ -120,7 +123,6 @@ let private getTopology (svc: HealthService) : HttpHandler =
                 | None, Some f   -> f
                 | None, None     -> false
 
-        let liveNodes = svc.GetNodes()
         let liveEdges = svc.GetEdges()
         let liveByKey = liveNodes |> List.map (fun n -> n.key, n) |> Map.ofList
         // Analyse the LIVE graph (seed + overrides + derived + user edges), not the
@@ -152,31 +154,229 @@ let private getTopology (svc: HealthService) : HttpHandler =
                     let num = n.key.Substring 8
                     svc.FindVuePower num |> Option.bind (fun e -> fromEntity e)
                 else None
+        let socOf (n: Node) : float option =
+            n.socEntity
+            |> Option.bind (fun e ->
+                 match entRaw |> Map.tryFind e with
+                 | Some v ->
+                     match System.Double.TryParse(v.Trim()) with
+                     | true, pct -> Some pct
+                     | _         -> None
+                 | None -> None)
+
         let notes = svc.GetNotes()
 
-        // A node has no power when an ancestor power-edge parent is faulted, or
-        // when the plug/station feeding it reports its output off.
+        // ── Power propagation ────────────────────────────────────────────────
+        // Power is TRANSITIVE: it flows source -> ... -> device, so a node is
+        // dead when ANY link in the chain above it is dead. The old check read
+        // `Topology.edges` (empty since edges became derived) and only looked
+        // one hop up, so nothing downstream of a dead source ever went dark.
+        // `powerFrom = area:X` targets the area-kind node covering area X.
+        let areaNodeOf (area: string) =
+            liveNodes
+            |> List.tryFind (fun n -> n.kind = "area" && n.area = Some area)
+            |> Option.map (fun n -> n.key)
+        let parentKey (src: PowerSource) =
+            match src with
+            | FromDevice k -> Some k
+            | FromArea a   -> areaNodeOf a
+            | PowerUnknown -> None
+
+        // A station/plug whose OWN output is switched off (or reporting no AC
+        // watts) stops feeding everything downstream of it.
         let outputOffOf (key: string) =
-            Topology.nodeByKey
+            liveByKey
             |> Map.tryFind key
             |> Option.bind (fun n -> n.outputEntity)
             |> Option.map (fun e ->
                  match entRaw |> Map.tryFind e with
                  | Some v ->
-                     let v = v.ToLowerInvariant()
-                     v = "off" || v = "0"
+                     match v.Trim().ToLowerInvariant() with
+                     | "off" -> true
+                     | "on"  -> false
+                     | ""    -> false
+                     // Cover states are a POSITION, never a power cut.
+                     | "open" | "closed" | "opening" | "closing" -> false
+                     // A watt reading: treat a true zero as output off, but do
+                     // not read `unavailable` as off - a lost BLE connection to
+                     // the station says nothing about its AC output, and
+                     // blacking out the house on a dropped sensor would be a
+                     // far worse error than missing a real shutdown.
+                     | num ->
+                         match System.Double.TryParse num with
+                         | true, w -> w <= 0.0
+                         | _       -> false
                  | None -> false)
             |> Option.defaultValue false
 
-        let poweredOff (key: string) =
-            Topology.edges
-            |> List.filter (fun e -> e.child = key && e.kind = Power)
-            |> List.exists (fun e -> isFaulted e.parent || outputOffOf e.parent)
+        // Which upstream feeds actually carry power INTO this node right now.
+        // A transfer switch passes exactly one (chosen by its position); a 240 V
+        // device needs both legs, so either one failing kills it.
+        let feedsOf (n: Node) =
+            match n.feedMode with
+            | Both -> [ parentKey n.powerFrom; parentKey n.altFrom ] |> List.choose id, true
+            | Selected ->
+                match n.position with
+                | PosOff  -> [], false          // switched off: no feed at all
+                | PosLine -> [ parentKey n.altFrom   ] |> List.choose id, true
+                | _       -> [ parentKey n.powerFrom ] |> List.choose id, true
+
+        // Memoised depth-first walk up the power tree, so a 30-node chain is
+        // resolved once rather than re-walked per node. Cycles resolve to
+        // powered rather than looping forever.
+        let powerCache = System.Collections.Generic.Dictionary<string, bool>()
+        let rec hasPower (visiting: Set<string>) (key: string) : bool =
+            match powerCache.TryGetValue key with
+            | true, v -> v
+            | _ ->
+            if visiting.Contains key then true
+            else
+                let visiting = visiting.Add key
+                let result =
+                    match liveByKey |> Map.tryFind key with
+                    | None -> true
+                    | Some n ->
+                        // Only switch positions and upstream supply decide this.
+                        // A FAULTED node is deliberately not treated as dead:
+                        // "stopped reporting" is not evidence of a power cut,
+                        // and asserting one sends you to the wrong remedy.
+                        if n.position = PosOff then false
+                        elif n.kind = "power-station" || n.kind = "battery" then
+                            // Its upstream feed only CHARGES it; the station
+                            // keeps supplying its circuits from the cells.
+                            true
+                        else
+                            let feeds, needsFeed = feedsOf n
+                            if not needsFeed then false
+                            elif List.isEmpty feeds then
+                                // No upstream feed. A battery runs off its own
+                                // cells, and grid/internet are tree roots, so
+                                // all of these stand on their own. Anything else
+                                // is merely unmapped - and unmapped must not
+                                // read as dead.
+                                true
+                            else
+                                // 240 V needs BOTH legs; everything else needs
+                                // the single feed that is currently selected.
+                                let alive k =
+                                    hasPower visiting k && not (outputOffOf k)
+                                match n.feedMode with
+                                | Both     -> feeds |> List.forall alive
+                                | Selected -> feeds |> List.exists alive
+                powerCache.[key] <- result
+                result
+
+        let poweredOff (key: string) = not (hasPower Set.empty key)
 
         let radioDown (key: string) =
-            Topology.edges
+            liveEdges
             |> List.filter (fun e -> e.child = key && (e.kind = Network || e.kind = BtHost))
             |> List.exists (fun e -> isFaulted e.parent)
+
+        // ── Evidence for the nodes that are actually broken ──────────────────
+        // Only faulted nodes are probed. A device doing its job is its own proof
+        // of health - the Pi Zero publishing thermal frames demonstrates power,
+        // radio and camera all at once, and pinging it would tell us nothing we
+        // did not already know. Once it stops, the question changes from "is it
+        // ok" to "which of several causes is it", and that is worth traffic.
+        let faultedKeys =
+            verdicts
+            |> List.filter (fun v -> v.faulted)
+            |> List.map (fun v -> v.key)
+            |> Set.ofList
+
+        /// First current IP known for a node, from the inventory join.
+        let ipOf (n: Node) =
+            n.device
+            |> Option.bind (fun d -> deviceIfaces |> Map.tryFind d)
+            |> Option.defaultValue []
+            |> List.tryPick (fun (i: Ifaces.Iface) -> i.ip)
+
+        /// Nodes sharing a power source with this one - the comparison that
+        /// separates "this device died" from "the circuit died". Deliberately
+        /// prefers a mate on a DIFFERENT SSID: one that is up proves the power
+        /// is fine without the radio confounding the answer.
+        let circuitMates (n: Node) =
+            match n.powerFrom with
+            | PowerUnknown -> []
+            | src ->
+                liveNodes
+                |> List.filter (fun m -> m.key <> n.key && m.powerFrom = src)
+                |> List.sortBy (fun m -> if m.lan = n.lan then 1 else 0)
+
+        let diagnoses =
+            if Set.isEmpty faultedKeys then Map.empty
+            else
+                // Collect every address worth probing in ONE parallel batch.
+                let targets =
+                    faultedKeys
+                    |> Set.toList
+                    |> List.collect (fun k ->
+                        match liveByKey |> Map.tryFind k with
+                        | None -> []
+                        | Some n ->
+                            (ipOf n |> Option.toList)
+                            @ (circuitMates n |> List.truncate 2 |> List.choose ipOf))
+                    |> List.distinct
+                let probes = Probe.pingAll 2000 targets
+
+                faultedKeys
+                |> Set.toList
+                |> List.choose (fun k ->
+                    liveByKey
+                    |> Map.tryFind k
+                    |> Option.map (fun n ->
+                        let reachOf ip = probes |> Map.tryFind ip |> Option.map (fun e -> e.reach)
+                        let findings = ResizeArray<Diagnose.Finding>()
+
+                        // The symptom itself. It says something is wrong; on its
+                        // own it says nothing about what.
+                        findings.Add(Diagnose.support
+                                        [ Diagnose.DeviceHung; Diagnose.PeripheralFailed
+                                          Diagnose.IntegrationBroken ]
+                                        (n.label + " stopped reporting"))
+
+                        // The device's own reachability is the single most
+                        // discriminating observation available.
+                        match ipOf n |> Option.bind reachOf with
+                        | Some (Probe.Up ms) ->
+                            findings.Add(Diagnose.ruleOut
+                                            [ Diagnose.PowerLost; Diagnose.NetworkDown ]
+                                            $"answers ping in {ms} ms - so it has power and a working radio")
+                            findings.Add(Diagnose.support
+                                            [ Diagnose.DeviceHung; Diagnose.PeripheralFailed
+                                              Diagnose.IntegrationBroken ]
+                                            "reachable but not doing its job")
+                        | Some Probe.Down ->
+                            findings.Add(Diagnose.support
+                                            [ Diagnose.PowerLost; Diagnose.NetworkDown
+                                              Diagnose.DeviceHung ]
+                                            "does not answer ping")
+                        | Some Probe.Unknown | None ->
+                            findings.Add(Diagnose.support [] "no address to probe")
+
+                        // Circuit-mates separate a dead circuit from a dead device.
+                        for m in circuitMates n |> List.truncate 2 do
+                            match ipOf m |> Option.bind reachOf with
+                            | Some (Probe.Up _) ->
+                                let sameSsid = m.lan = n.lan
+                                findings.Add(Diagnose.ruleOut
+                                                [ Diagnose.PowerLost ]
+                                                (m.label + " shares its power source and is up"
+                                                 + (if sameSsid then "" else " (on a different SSID)")))
+                            | Some Probe.Down ->
+                                findings.Add(Diagnose.support
+                                                [ Diagnose.PowerLost ]
+                                                (m.label + " shares its power source and is also down"))
+                            | _ -> ()
+
+                        // Upstream power, from the model rather than a probe.
+                        if not (hasPower Set.empty n.key) then
+                            findings.Add(Diagnose.support [ Diagnose.PowerLost ]
+                                            "its power source is off or unavailable")
+
+                        k, Diagnose.rank k (List.ofSeq findings)))
+                |> Map.ofList
 
         let nodesJ =
             liveNodes
@@ -198,6 +398,16 @@ let private getTopology (svc: HealthService) : HttpHandler =
                    because  = because
                    affected = affected
                    blindSpot = n.blindSpot
+                   diagnosis =
+                     diagnoses
+                     |> Map.tryFind n.key
+                     |> Option.map (fun ds ->
+                          ds |> List.truncate 3
+                             |> List.map (fun d ->
+                                  {| cause  = d.cause.label
+                                     score  = d.score
+                                     remedy = d.remedy
+                                     why    = d.findings |> List.map (fun f -> f.text) |})) 
                    remedy    = n.remedy
                    size      = n.size
                    link      = n.link
@@ -206,14 +416,18 @@ let private getTopology (svc: HealthService) : HttpHandler =
                    position  = n.position.label
                    feedMode  = n.feedMode.label
                    watts     = powerOf n
+                   soc       = socOf n
                    // True when HA can really switch this node, as opposed to a
                    // breaker/transfer-switch position that is only recorded.
                    outputEntity = n.outputEntity
                    powerEntity  = n.powerEntity
                    switchable =
-                     n.outputEntity
-                     |> Option.map (fun e -> e.StartsWith "switch.")
-                     |> Option.defaultValue false
+                     not (HealthService.CriticalSupply |> Set.contains n.key) &&
+                     (n.outputEntity
+                      |> Option.map (fun e ->
+                           e.StartsWith "switch." || e.StartsWith "cover." ||
+                           e.StartsWith "light."  || e.StartsWith "fan.")
+                      |> Option.defaultValue false)
                    lan       = n.lan.label
                    // One entry per physical interface, straight from the
                    // inventory - the topology does not re-declare MACs or IPs.
@@ -233,8 +447,12 @@ let private getTopology (svc: HealthService) : HttpHandler =
                           match entRaw |> Map.tryFind e with
                           | Some v ->
                               let v = v.ToLowerInvariant()
-                              not (v = "off" || v = "0" || v = "unavailable" || v = "unknown")
+                              not (v = "off" || v = "0" || v = "closed" ||
+                                   v = "unavailable" || v = "unknown")
                           | None -> true)
+                   // Raw state, so a cover can read OPEN/CLOSED rather than ON/OFF.
+                   outputState =
+                     n.outputEntity |> Option.bind (fun e -> entRaw |> Map.tryFind e)
                    // Powered / radio-up, so the UI can grey out the box or the
                    // radio icon independently.
                    powered   = not (poweredOff n.key)
@@ -282,7 +500,7 @@ let private getTopology (svc: HealthService) : HttpHandler =
                              // A fixed catalogue UNIONED with kinds in use: deriving
                              // the list purely from usage meant the last node of a
                              // kind changing type deleted that option permanently.
-                             [ "grid"; "battery"; "breaker"; "triple-switch"; "circuit"
+                             [ "grid"; "power-station"; "battery"; "breaker"; "triple-switch"; "circuit"
                                "plug"; "outlet"; "ap"; "modem"; "internet"; "switch"
                                "pi"; "computer"; "host"; "esp32"; "sensor"; "camera"
                                "ev"; "opener"; "appliance"; "zone"; "area"; "device" ]
@@ -319,6 +537,8 @@ type OverrideDto = {
     feedMode  : string
     powerEnt  : string
     outputEnt : string
+    device    : string
+    socEnt    : string
 }
 
 let private saveNode (svc: HealthService) : HttpHandler =
@@ -342,7 +562,9 @@ let private saveNode (svc: HealthService) : HttpHandler =
                   position  = opt dto.position
                   feedMode  = opt dto.feedMode
                   powerEnt  = opt dto.powerEnt
-                  outputEnt = opt dto.outputEnt }
+                  outputEnt = opt dto.outputEnt
+                  device    = opt dto.device
+                  socEnt    = opt dto.socEnt }
             return! Response.ofJson {| ok = true |} ctx
     }
 

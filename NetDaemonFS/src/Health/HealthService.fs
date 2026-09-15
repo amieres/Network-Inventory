@@ -379,21 +379,43 @@ type HealthService
         |> Seq.tryHead
 
     /// Operate a real smart switch. Returns the entity acted on, or why not.
+    /// Power stations whose output the monitoring system depends on. These are
+    /// read-only: the dashboard shows their AC-output state but offers no
+    /// control, and OperateSwitch refuses them outright.
+    static member val CriticalSupply = Set.ofList [ "ac500_1"; "ac500_2" ] with get
+
     member this.OperateSwitch(key: string, turnOn: bool) : Result<string, string> =
         let node = this.GetNodes() |> List.tryFind (fun n -> n.key = key)
         match node with
         | None -> Result.Error ("unknown node: " + key)
+        | Some n when HealthService.CriticalSupply |> Set.contains n.key ->
+            // NEVER actuate the AC500s. They feed circuits A-J, which power the
+            // Game Room - Home Assistant itself, the modem and every router.
+            // Switching one off would black out the system issuing the command,
+            // leaving no way to switch it back on. Their AC-output switch is
+            // read to know whether they are still supplying power, never
+            // written. (The AC200M is NOT on this list: it feeds only the
+            // window A/C and the battery fan, so it is safe to operate.)
+            Result.Error (key + " is a critical power station - refusing to switch it")
         | Some n ->
             match n.outputEntity with
-            | Some e when e.StartsWith "switch." ->
+            | Some e when e.StartsWith "cover." ->
+                // A cover is not a switch: it takes open_cover/close_cover, and
+                // its state is open/closed rather than on/off.
+                let ent = NetDaemon.HassModel.Entities.Entity(ha, e)
+                ent.CallService(if turnOn then "open_cover" else "close_cover")
+                log.LogInformation("Health: {Action} {Entity} (node {Key})",
+                                   (if turnOn then "opened" else "closed"), e, key)
+                Result.Ok e
+            | Some e when e.StartsWith "switch." || e.StartsWith "light." || e.StartsWith "fan." ->
                 // A breaker or transfer-switch POSITION is recorded, not actuated;
-                // only a real switch entity can be operated.
+                // only a real controllable entity can be operated.
                 let ent = NetDaemon.HassModel.Entities.Entity(ha, e)
                 ent.CallService(if turnOn then "turn_on" else "turn_off")
                 log.LogInformation("Health: {Action} {Entity} (node {Key})",
                                    (if turnOn then "turned on" else "turned off"), e, key)
                 Result.Ok e
-            | Some e -> Result.Error (e + " is not a switch entity")
+            | Some e -> Result.Error (e + " is not an operable entity")
             | None   -> Result.Error (key + " has no output entity to switch")
 
     member _.GetNotes() : Map<string, string> =
@@ -440,9 +462,9 @@ type HealthService
 
     /// Raw HA state strings for arbitrary entities, used for output/link
     /// indicators that are not themselves health signals.
-    member _.GetRawStates() : Map<string, string> =
-        Topology.nodes
-        |> List.choose (fun n -> n.outputEntity)
+    member this.GetRawStates() : Map<string, string> =
+        this.GetNodes()
+        |> List.collect (fun n -> [ n.outputEntity; n.socEntity ] |> List.choose id)
         |> List.distinct
         |> List.choose (fun e ->
             match ha.GetState e with

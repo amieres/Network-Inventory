@@ -85,6 +85,10 @@ type Node = {
     /// you can see what is actually RUNNING, not merely connected - a plug that
     /// is on but drawing 0 W usually means the thing plugged into it is dead.
     powerEntity : string option
+    /// Entity reporting state of charge, in %. A power station turns its AC
+    /// output off before shutting down, so a falling SOC is the advance warning
+    /// that everything downstream is about to go dark.
+    socEntity : string option
     /// Position of a switchable device:
     ///   breaker       -> On | Off
     ///   triple switch -> Generator | Off | Line
@@ -171,7 +175,7 @@ module Topology =
           powerFrom = PowerUnknown; lan = NoLan
           btHost = None; needsInternet = false; wanFrom = None
           altFrom = PowerUnknown; position = PosUnset; feedMode = Selected
-          powerEntity = None }
+          powerEntity = None; socEntity = None }
 
     let nodes : Node list = [
         // ── Power sources ────────────────────────────────────────────────────
@@ -191,27 +195,30 @@ module Topology =
         // `outputEntity` is the unit's AC-OUTPUT state: a station can be healthy
         // and pingable while its output is off - a STATE of the device, not a
         // separate device.
-        yield { node "ac500_1" "BLUETTI AC500 #1" "battery" with
+        yield { node "ac500_1" "BLUETTI AC500 #1" "power-station" with
                   device = Some "BLUETTI AC500 #1"; entity = Some "binary_sensor.ac500_connected"
                   outputEntity = Some "sensor.ac500_ac_output_power"
                   area = Some "Garage"; link = Some "ABEWNETG"; size = 3
                   powerFrom = FromDevice "grid"; lan = Wifi "ABEWNETG"
                   btHost = Some "raspi4"
-                  powerEntity = Some "sensor.ac500_ac_output_power" }
-        yield { node "ac500_2" "BLUETTI AC500 #2" "battery" with
+                  powerEntity = Some "sensor.ac500_ac_output_power"
+                  socEntity = Some "sensor.ac500_total_battery_percent" }
+        yield { node "ac500_2" "BLUETTI AC500 #2" "power-station" with
                   device = Some "BLUETTI AC500 #2"; entity = Some "binary_sensor.ac500_connected_2"
                   outputEntity = Some "sensor.ac500_ac_output_power_2"
                   area = Some "Garage"; link = Some "ABEWNETG"; size = 3
                   powerFrom = PowerUnknown; lan = Wifi "ABEWNETG"
                   btHost = Some "raspi4"
-                  powerEntity = Some "sensor.ac500_ac_output_power_2" }
-        yield { node "ac200m" "BLUETTI AC200M" "battery" with
+                  powerEntity = Some "sensor.ac500_ac_output_power_2"
+                  socEntity = Some "sensor.ac500_total_battery_percent_2" }
+        yield { node "ac200m" "BLUETTI AC200M" "power-station" with
                   device = Some "BLUETTI AC200M"; entity = Some "binary_sensor.ac200m_connected"
                   outputEntity = Some "sensor.ac200m_ac_output_power"
                   area = Some "Garage"; size = 3
                   powerFrom = PowerUnknown; lan = NoLan
                   btHost = Some "raspi4"
-                  powerEntity = Some "sensor.ac200m_ac_output_power" }
+                  powerEntity = Some "sensor.ac200m_ac_output_power"
+                  socEntity = Some "sensor.ac200m_total_battery_percent" }
 
         // ── Manual transfer switch circuits ──────────────────────────────────
         // A C E G H default to AC500 #1, B D F I to AC500 #2 - but every circuit

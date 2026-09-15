@@ -34,6 +34,8 @@
     <Compile Include="src/Health/Ifaces.fs" />
     <Compile Include="src/Health/Store.fs" />
     <Compile Include="src/Health/Criteria.fs" />
+    <Compile Include="src/Health/Probe.fs" />
+    <Compile Include="src/Health/Diagnose.fs" />
     <Compile Include="src/Health/Devices.fs" />
     <Compile Include="src/Health/Registry.fs" />
     <Compile Include="src/Health/HistoryClient.fs" />

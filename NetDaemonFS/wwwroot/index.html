@@ -560,9 +560,18 @@
     .n-sup   { fill: #2a2413; stroke: #f59e0b; }
     /* No power: greyed out entirely - a dead box reads differently from a fault. */
     .n-dead  { fill: #15171d; stroke: #3f4250; }
+    /* No power SOURCE wired up at all: not a fault, just an unmapped node. */
+    .n-nosrc { fill: #191b21; stroke: #6b7280; stroke-dasharray: 4 2; }
     .n-label { font: 600 11px 'Segoe UI', sans-serif; fill: #e2e8f0; }
     .n-label.dim { fill: #64748b; }
     .n-kind  { font: 9px 'Segoe UI', sans-serif; fill: #64748b; }
+    /* State of charge: green healthy, amber getting low, red about to drop AC. */
+    .n-soc   { font: 600 9px 'Segoe UI', sans-serif; }
+    .n-soc.k-inline { text-anchor: end; }
+    .n-soc.soc-ok  { fill: #34d399; }
+    .n-soc.soc-mid { fill: #fbbf24; }
+    .n-soc.soc-low { fill: #f87171; }
+    .n-kind.k-inline { text-anchor: end; fill: #475569; }
     .n-blind { font: 11px 'Segoe UI', sans-serif; fill: #fbbf24; text-anchor: end; }
     .pip-off { fill: #f87171; }
     .e-power   { stroke: #f59e0b; stroke-width: 1.4; fill: none; }
@@ -588,12 +597,14 @@
       position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
       background: #1a1d2e; border: 1px solid #2d3048; border-radius: 8px;
       min-width: 360px; max-width: 460px;
+      max-height: 90vh; display: flex; flex-direction: column;
     }
     .ed-head { padding: 0.7rem 1rem; border-bottom: 1px solid #2d3048;
                display: flex; justify-content: space-between; align-items: center;
                font-size: 0.9rem; font-weight: 600; }
     .ed-head button { background: none; border: none; color: #94a3b8; font-size: 1.2rem; cursor: pointer; }
-    .ed-body { padding: 0.8rem 1rem; display: flex; flex-direction: column; gap: 0.6rem; }
+    .ed-body { padding: 0.8rem 1rem; display: flex; flex-direction: column; gap: 0.6rem;
+               overflow-y: auto; min-height: 0; flex: 1; }
     .ed-body label { display: flex; flex-direction: column; gap: 0.2rem;
                      font-size: 0.72rem; color: #64748b; text-transform: uppercase;
                      letter-spacing: 0.04em; }
@@ -607,6 +618,10 @@
                 text-transform: none !important; font-size: 0.82rem !important; color: #cbd5e1 !important; }
     .ed-check input { accent-color: #4f46e5; }
     .ed-meta { font-size: 0.72rem; color: #475569; }
+    /* Diagnosis evidence: the reasoning behind a verdict, not just the verdict. */
+    .h-why { margin: 0.25rem 0 0 1.1rem; padding: 0; list-style: disc; }
+    .h-why li { font-size: 0.74rem; color: #94a3b8; line-height: 1.5; }
+    .h-alt { color: #94a3b8; font-size: 0.78rem; }
     .ed-body textarea {
       background: #0f1117; border: 1px solid #2d3048; border-radius: 4px;
       color: #e2e8f0; padding: 0.35rem 0.5rem; font-size: 0.82rem;
@@ -671,7 +686,7 @@
 <body>
 
 <header>
-  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v107 · js <span id="js-version">?</span></span></h1>
+  <h1>Network Inventory <span style="font-size:0.65rem;color:#4b5563;font-weight:400">html v134 · js <span id="js-version">?</span></span></h1>
   <span class="view-tabs">
     <button class="view-tab active" data-view="inventory">Inventory</button>
     <button class="view-tab"        data-view="health">Health</button>
@@ -826,6 +841,6 @@
 <div id="ctx-menu" hidden></div>
 
 <script src="app.js?v=89"></script>
-<script src="health.js?v=37"></script>
+<script src="health.js?v=65"></script>
 </body>
 </html>
