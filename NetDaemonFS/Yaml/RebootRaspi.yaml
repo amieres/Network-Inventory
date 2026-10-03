@@ -6,3 +6,4 @@ RebootRaspi.Config:
   command: sudo reboot
   switch:  switch.kauf_plug   # Kauf_XX smart plug — power-cycled when SSH is unreachable
   offSecs: 10
+  autoReboot: false   # 2026-10-02: off while the AC500s are unreadable after their IoT firmware update

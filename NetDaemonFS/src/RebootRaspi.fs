@@ -22,6 +22,7 @@ type Config() =
     member val Command   : string = "" with get, set
     member val Switch    : string = "" with get, set   // smart-switch entity_id used to power-cycle when SSH is unreachable
     member val OffSecs   : int    = 10 with get, set    // seconds to hold the switch off before turning it back on
+    member val AutoReboot: bool   = true with get, set  // 30-min "AC500 disconnected => reboot" check; the reboot_raspi service works either way
 
 
 
@@ -65,6 +66,7 @@ type CheckAC500s(ha: IHaContext, scheduler: INetDaemonScheduler, config: IAppCon
                 rebootRaspi $"F# Service Callback Rebooting {config.Computer}!" )
 
     do
+      if config.AutoReboot then
         scheduler.RunEvery(TimeSpan.FromMinutes(30.0), fun () ->
             let entities = new Entities(ha)
             if entities.BinarySensor.Ac500Connected.IsOff() || entities.BinarySensor.Ac500Connected2.IsOff() then

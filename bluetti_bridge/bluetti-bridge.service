@@ -1,0 +1,14 @@
+[Unit]
+Description=Bluetti AC500 encrypted-BLE to MQTT bridge
+After=bluetooth.target network-online.target
+Wants=network-online.target
+
+[Service]
+User=amieres
+WorkingDirectory=/home/amieres/bluetti_bridge
+ExecStart=/home/amieres/venv-btlib/bin/python bluetti_bridge.py
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target
